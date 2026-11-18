@@ -34,7 +34,7 @@ url = "^2.5"
 
 [dev-dependencies]
 # The client the mock is tested with: generated from the same specification, in its own repository.
-openai-client-base = { version = "0.34.3", default-features = false, features = [
+openai-client-base = { version = "0.35.0", default-features = false, features = [
     "rustls",
     "audio",
     "batch",
