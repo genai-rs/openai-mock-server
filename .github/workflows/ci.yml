@@ -45,6 +45,10 @@ jobs:
   all-features:
     name: Every API group
     runs-on: ubuntu-latest
+    env:
+      # Every group is a large build: without debug info, and without the doc tests (the default features' run
+      # them), it stays within a hosted runner's memory.
+      CARGO_PROFILE_DEV_DEBUG: 0
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
@@ -57,4 +61,4 @@ jobs:
       - name: Clippy with every API group
         run: cargo clippy --all-targets --all-features -- -D warnings
       - name: Test with every API group
-        run: cargo test --all-features
+        run: cargo test --all-features --lib --tests

@@ -23,6 +23,8 @@ jobs:
     name: Generate
     runs-on: ubuntu-latest
     env:
+      # Every API group is a large build: no debug info keeps it within a hosted runner's memory.
+      CARGO_PROFILE_DEV_DEBUG: 0
       PUBLISH: ${{ github.ref == 'refs/heads/main' && (github.event_name == 'schedule' || inputs.publish) }}
     steps:
       # A GitHub App token, so that the pull request triggers CI.
@@ -53,7 +55,8 @@ jobs:
           python3 -m unittest discover -s scripts/tests -v
           cargo fmt --all -- --check
           cargo clippy --all-targets --all-features -- -D warnings
-          cargo test --all-features
+          cargo test --all-features --lib --tests
+          cargo test --doc
 
       - name: Read the specification revision
         id: spec
