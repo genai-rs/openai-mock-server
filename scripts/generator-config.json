@@ -1,0 +1,68 @@
+{
+  "packageName": "openai-mock-server",
+  "targets": [
+    "server"
+  ],
+  "serverDefaultMethods": true,
+  "apiFeaturesFile": "scripts/api-features.yaml",
+  "dateLibrary": "string",
+  "titleNaming": false,
+  "webhookModule": "WebhookEvents",
+  "resetQueryParameterStyle": true,
+  "deepObjectQueryParameters": [
+    "/fine_tuning/jobs?metadata",
+    "/organization/audit_logs?effective_at"
+  ],
+  "stringIdSchemas": [
+    "ModelIds=Model identifier as string",
+    "ModelIdsShared=Model identifier as string",
+    "ModelIdsResponses=Model identifier as string",
+    "BetaModelIdsShared=Model identifier as string",
+    "BetaModelIdsResponses=Model identifier as string",
+    "BetaModelIdsCompaction",
+    "CreateCompletionRequestModel",
+    "CreateAssistantRequestModel",
+    "CreateThreadAndRunRequestModel",
+    "CreateImageRequestModel",
+    "CreateEmbeddingRequestModel",
+    "CreateSpeechRequestModel",
+    "CreateFineTuningJobRequestModel",
+    "CreateTranscriptionRequestModel",
+    "CreateTranslationRequestModel",
+    "CreateModerationRequestModel",
+    "CreateImageEditRequestModel",
+    "CreateImageVariationRequestModel",
+    "CreateImageEditRequestImage",
+    "VoiceIdsShared=Model identifier as string"
+  ],
+  "stringIdProperties": [
+    "model=ID of the model to use",
+    "voice=The voice to use for audio generation"
+  ],
+  "stringProperties": [
+    "CreateEmbeddingRequest.model",
+    "RealtimeResponseCreateParams.conversation",
+    "CreateImageEditRequest.model",
+    "CreateImageVariationRequest.model",
+    "CreateImageRequest.model",
+    "CreateTranscriptionRequest.model",
+    "CreateTranslationRequest.model",
+    "CreateModerationRequest.model"
+  ],
+  "optionalProperties": [
+    "OutputTextContent.logprobs",
+    "BetaOutputTextContent.logprobs",
+    "ResponseTextDeltaEvent.logprobs",
+    "BetaResponseTextDeltaEvent.logprobs",
+    "ResponseTextDoneEvent.logprobs",
+    "BetaResponseTextDoneEvent.logprobs",
+    "Response.access_programs",
+    "BetaResponse.access_programs",
+    "ResponseUsage.input_tokens_details.cache_write_tokens",
+    "BetaResponseUsage.input_tokens_details.cache_write_tokens",
+    "InputTokensDetailsResource.cache_write_tokens"
+  ],
+  "fileProperties": [
+    "CreateImageEditRequest.image"
+  ]
+}

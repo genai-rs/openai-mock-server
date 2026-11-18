@@ -1,0 +1,19 @@
+# Releases with the shared workflow: merging the release PR publishes.
+# See https://github.com/genai-rs/.github/blob/main/docs/release.md
+name: Release-plz
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+  # The OIDC token crates.io Trusted Publishing checks.
+  id-token: write
+
+jobs:
+  release-plz:
+    uses: genai-rs/.github/.github/workflows/release-plz.yml@main
+    secrets: inherit

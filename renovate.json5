@@ -1,0 +1,6 @@
+{
+  $schema: 'https://docs.renovatebot.com/renovate-schema.json',
+  extends: ['github>genai-rs/.github:renovate-default'],
+  // Generated code: its dependencies are the generator's, in Cargo.toml.
+  ignorePaths: ['src/generated/**'],
+}

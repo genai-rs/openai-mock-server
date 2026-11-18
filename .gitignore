@@ -1,0 +1,18 @@
+/target/
+**/*.rs.bk
+
+# IDE
+.idea
+.vscode
+*.swp
+
+# OS
+.DS_Store
+
+# Python cache of the scripts
+__pycache__/
+*.pyc
+
+# Environment
+.env
+.env.*

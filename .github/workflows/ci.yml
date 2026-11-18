@@ -1,0 +1,51 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  ci:
+    uses: genai-rs/.github/.github/workflows/rust-ci.yml@main
+    with:
+      msrv: "1.88"
+      # The default features are the API groups the mock scripts; `full` (every group of the generated server) is
+      # built once, by the all-features job below.
+      features: "--features default"
+      # Most of the crate is generated code.
+      run-coverage: false
+    secrets: inherit
+
+  scripts:
+    name: Generation scripts
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+      - name: Test the scripts
+        run: python3 -m unittest discover -s scripts/tests -v
+
+  all-features:
+    name: Every API group
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - name: Cache
+        uses: Swatinem/rust-cache@v2
+      - name: Clippy with every API group
+        run: cargo clippy --all-targets --all-features -- -D warnings
+      - name: Test with every API group
+        run: cargo test --all-features

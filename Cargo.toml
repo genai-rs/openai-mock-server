@@ -1,0 +1,222 @@
+[package]
+name = "openai-mock-server"
+version = "0.1.0"
+authors = ["Tim Van Wassenhove <github@timvw.be>"]
+description = "A scripted mock of the OpenAI API for tests, served by an axum server generated from OpenAI's OpenAPI specification"
+license = "MIT OR Apache-2.0"
+edition = "2021"
+repository = "https://github.com/genai-rs/openai-mock-server"
+documentation = "https://docs.rs/openai-mock-server"
+readme = "README.md"
+keywords = ["openai", "mock", "testing", "server"]
+categories = ["development-tools::testing"]
+rust-version = "1.88"
+exclude = ["openapi.json", "scripts/", ".github/", "target/", "release-plz.toml", "renovate.json5", "CONTRIBUTING.md", "SECURITY.md"]
+
+[dependencies]
+# The mock.
+bytes = "1"
+tokio = { version = "1", features = ["net", "rt", "sync", "time"] }
+# The generated server and its models (src/generated). scripts/check_manifest.py checks these, and the API features
+# below, against the manifest the generator writes.
+axum = { version = "^0.8", default-features = false, features = ["multipart", "tokio", "http1", "http2"] }
+bon = { version = "^3", optional = true }
+futures-util = { version = "^0.3", default-features = false, features = ["std"] }
+http = { version = "^1" }
+regex = "^1.10"
+serde = { version = "^1.0", features = ["derive"] }
+serde_json = "^1.0"
+serde_repr = "^0.1"
+serde_with = { version = "^3.8", default-features = false, features = ["base64", "std", "macros"], optional = true }
+timvw-rust-runtime = { version = "^0.4", default-features = false, features = ["fs"], optional = true }
+url = "^2.5"
+
+[dev-dependencies]
+# The client the mock is tested with: generated from the same specification, in its own repository.
+openai-client-base = { version = "0.34.3", default-features = false, features = [
+    "rustls",
+    "audio",
+    "batch",
+    "chat-completion",
+    "embedding",
+    "file",
+    "model",
+    "moderation",
+    "realtime",
+    "responses",
+] }
+futures-util = "0.3"
+reqwest = { version = "0.13", default-features = false }
+timvw-rust-runtime = "0.4"
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+
+[features]
+# The API groups whose operations the mock scripts. They are needed: the mock does not build without them.
+default = [
+    "audio",
+    "batch",
+    "chat-completion",
+    "embedding",
+    "file",
+    "image",
+    "model",
+    "moderation",
+    "realtime",
+    "responses",
+]
+# The generator's API features (scripts/api-features.yaml). `<group>` compiles the group's operations with its
+# models, `<group>-types` only its models; `full` is every group. An operation of a group that is compiled and not
+# scripted answers `501`; one of a group that is not compiled is not routed (`404`).
+full = [
+    "administration",
+    "agents",
+    "assistants",
+    "audio",
+    "batch",
+    "chat-completion",
+    "chatkit",
+    "completions",
+    "container",
+    "content-provenance-checks",
+    "decisions",
+    "embedding",
+    "evals",
+    "file",
+    "finetuning",
+    "image",
+    "live",
+    "model",
+    "moderation",
+    "realtime",
+    "responses",
+    "safety",
+    "skill",
+    "upload",
+    "vaults",
+    "vectorstore",
+    "video",
+    "webhook",
+    "webhook-events",
+    "types",
+]
+types = [
+    "administration-types",
+    "agents-types",
+    "assistants-types",
+    "audio-types",
+    "batch-types",
+    "chat-completion-types",
+    "chatkit-types",
+    "completions-types",
+    "container-types",
+    "content-provenance-checks-types",
+    "decisions-types",
+    "embedding-types",
+    "evals-types",
+    "file-types",
+    "finetuning-types",
+    "image-types",
+    "live-types",
+    "model-types",
+    "moderation-types",
+    "realtime-types",
+    "responses-types",
+    "safety-types",
+    "skill-types",
+    "upload-types",
+    "vaults-types",
+    "vectorstore-types",
+    "video-types",
+    "webhook-types",
+    "webhook-events-types",
+    "dep:bon",
+    "dep:serde_with",
+]
+_api = []
+# tags Audit Logs, Certificates, Data retention, Groups, Group users, Group organization role assignments, Invites, Projects, Project groups, Project group role assignments, Project user role assignments, Roles, Spend alerts, Usage, Users, User organization role assignments, Hosted tools; paths under `/organization`
+administration = ["administration-types", "_api"]
+administration-types = ["dep:bon", "dep:serde_with"]
+# tag Agents
+agents = ["agents-types", "_api"]
+agents-types = ["dep:bon", "dep:serde_with"]
+# tag Assistants
+assistants = ["assistants-types", "_api"]
+assistants-types = ["dep:bon", "dep:serde_with"]
+# tag Audio
+audio = ["audio-types", "_api"]
+audio-types = ["dep:bon", "dep:serde_with"]
+# tag Batch
+batch = ["batch-types", "_api"]
+batch-types = ["dep:bon", "dep:serde_with"]
+# tag Chat
+chat-completion = ["chat-completion-types", "_api"]
+chat-completion-types = ["dep:bon", "dep:serde_with"]
+# paths under `/chatkit`
+chatkit = ["chatkit-types", "_api"]
+chatkit-types = ["dep:bon", "dep:serde_with"]
+# tag Completions
+completions = ["completions-types", "_api"]
+completions-types = ["dep:bon", "dep:serde_with"]
+# paths under `/containers`
+container = ["container-types", "_api"]
+container-types = ["dep:timvw-rust-runtime", "dep:bon", "dep:serde_with"]
+# paths under `/content_provenance_checks`
+content-provenance-checks = ["content-provenance-checks-types", "_api"]
+content-provenance-checks-types = ["dep:bon", "dep:serde_with"]
+# tag Decisions
+decisions = ["decisions-types", "_api"]
+decisions-types = ["dep:bon", "dep:serde_with"]
+# tag Embeddings
+embedding = ["embedding-types", "_api"]
+embedding-types = ["dep:bon", "dep:serde_with"]
+# tag Evals
+evals = ["evals-types", "_api"]
+evals-types = ["dep:bon", "dep:serde_with"]
+# tag Files
+file = ["file-types", "_api"]
+file-types = ["dep:bon", "dep:serde_with"]
+# tag Fine-tuning
+finetuning = ["finetuning-types", "_api"]
+finetuning-types = ["dep:bon", "dep:serde_with"]
+# tag Images
+image = ["image-types", "_api"]
+image-types = ["dep:bon", "dep:serde_with"]
+# tag Live
+live = ["live-types", "_api"]
+live-types = ["dep:bon", "dep:serde_with"]
+# tag Models
+model = ["model-types", "_api"]
+model-types = ["dep:bon", "dep:serde_with"]
+# tag Moderations
+moderation = ["moderation-types", "_api"]
+moderation-types = ["dep:bon", "dep:serde_with"]
+# tag Realtime
+realtime = ["realtime-types", "_api"]
+realtime-types = ["dep:bon", "dep:serde_with"]
+# tags Responses, Conversations
+responses = ["responses-types", "_api"]
+responses-types = ["dep:bon", "dep:serde_with"]
+# paths under `/safety`
+safety = ["safety-types", "_api"]
+safety-types = ["dep:bon", "dep:serde_with"]
+# tag Skills
+skill = ["skill-types", "_api"]
+skill-types = ["dep:timvw-rust-runtime", "dep:bon", "dep:serde_with"]
+# tag Uploads
+upload = ["upload-types", "_api"]
+upload-types = ["dep:bon", "dep:serde_with"]
+# tag Vaults
+vaults = ["vaults-types", "_api"]
+vaults-types = ["dep:bon", "dep:serde_with"]
+# tag Vector stores
+vectorstore = ["vectorstore-types", "_api"]
+vectorstore-types = ["dep:bon", "dep:serde_with"]
+# tag Videos
+video = ["video-types", "_api"]
+video-types = ["dep:timvw-rust-runtime", "dep:bon", "dep:serde_with"]
+# paths under `/webhook_endpoints`, `/webhook_event_types`
+webhook = ["webhook-types", "_api"]
+webhook-types = ["dep:bon", "dep:serde_with"]
+# tag WebhookEvents
+webhook-events = ["webhook-events-types", "_api"]
+webhook-events-types = ["dep:bon"]

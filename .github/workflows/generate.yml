@@ -1,0 +1,87 @@
+# Regenerates the server from OpenAI's current OpenAPI specification and proposes the result as a pull request.
+name: Generate
+
+on:
+  schedule:
+    - cron: '17 3 * * *'
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: Open or update the pull request (main only); otherwise the run only checks that generation works
+        type: boolean
+        default: false
+
+concurrency:
+  group: generate-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  generate:
+    name: Generate
+    runs-on: ubuntu-latest
+    env:
+      PUBLISH: ${{ github.ref == 'refs/heads/main' && (github.event_name == 'schedule' || inputs.publish) }}
+    steps:
+      # A GitHub App token, so that the pull request triggers CI.
+      - name: Create GitHub App token
+        if: env.PUBLISH == 'true'
+        id: app-token
+        uses: actions/create-github-app-token@v3
+        with:
+          client-id: ${{ secrets.BOT_APP_ID }}
+          private-key: ${{ secrets.BOT_PRIVATE_KEY }}
+
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Cache
+        uses: Swatinem/rust-cache@v2
+
+      - name: Generate
+        run: scripts/generate.sh
+
+      - name: Check the result
+        run: |
+          python3 -m unittest discover -s scripts/tests -v
+          cargo fmt --all -- --check
+          cargo clippy --all-targets --all-features -- -D warnings
+          cargo test --all-features
+
+      - name: Read the specification revision
+        id: spec
+        run: echo "revision=$(cat openapi.revision)" >> "$GITHUB_OUTPUT"
+
+      - name: Create pull request
+        if: env.PUBLISH == 'true'
+        uses: peter-evans/create-pull-request@v8
+        with:
+          token: ${{ steps.app-token.outputs.token }}
+          branch: automated/generate
+          delete-branch: true
+          commit-message: "feat: regenerate from OpenAI's specification at ${{ steps.spec.outputs.revision }}"
+          title: "feat: regenerate from OpenAI's specification"
+          body: |
+            The server and its models, regenerated from
+            [OpenAI's OpenAPI specification](https://github.com/openai/openai-openapi/blob/${{ steps.spec.outputs.revision }}/openapi.json)
+            at `${{ steps.spec.outputs.revision }}`.
+
+            The [workflow run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
+            built it with every API group and ran the tests. Review what changed in the operations the mock
+            scripts (`src/api.rs`) and in the fixtures before merging: a fixture that no longer matches its model
+            fails the tests, a new field does not.
+          labels: |
+            automated
+          add-paths: |
+            openapi.json
+            openapi.revision
+            src/generated/**
+            Cargo.toml
+            Cargo.lock
