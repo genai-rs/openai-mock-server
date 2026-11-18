@@ -5,7 +5,7 @@
   ],
   "serverDefaultMethods": true,
   "apiFeaturesFile": "scripts/api-features.yaml",
-  "dateLibrary": "string",
+  "dateLibrary": "jiff",
   "titleNaming": false,
   "webhookModule": "WebhookEvents",
   "resetQueryParameterStyle": true,
