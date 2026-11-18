@@ -7,7 +7,8 @@ on:
 
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  # A newer push replaces a pull request's run; every commit on main is checked.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read
@@ -25,8 +26,11 @@ jobs:
       # The default features are the API groups the mock scripts; `full` (every group of the generated server) is
       # built once, by the all-features job below.
       features: "--features default"
-      # Most of the crate is generated code.
+      # Most of the crate is generated code: coverage says little, and the rustdoc JSON cargo-semver-checks builds
+      # from it exceeds a hosted runner's memory (as for openai-client-base). Breaking changes are marked in the
+      # commits.
       run-coverage: false
+      run-semver-checks: false
     secrets: inherit
 
   scripts:
