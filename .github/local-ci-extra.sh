@@ -4,4 +4,4 @@ set -euo pipefail
 
 python3 -m unittest discover -s scripts/tests -v
 cargo clippy --all-targets --all-features -- -D warnings
-cargo test --all-features
+cargo test --all-features --lib --tests
