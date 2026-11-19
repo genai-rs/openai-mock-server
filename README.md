@@ -49,7 +49,8 @@ assert!(mock.rejected().is_empty());
   answered with a `400` and listed by `rejected()`, with the path of each value (`body.dimensions`).
 - **Webhooks:** `server::webhooks` sends OpenAI's webhooks to an endpoint of the test, typed
   (`Webhook::ResponseCompleted(...)`) and signed as OpenAI signs them (Standard Webhooks, with
-  `StandardWebhooksLayer`); `verify` checks them on the receiving side.
+  `StandardWebhooksLayer`); `verify` checks them on the receiving side. The events are the
+  models of the `webhook-events` group: enable the `webhook-events-types` feature (or `full`).
 - **Served:** chat completions, responses, embeddings, models, files, batches, images, audio, moderations and realtime
   calls (`op::SERVED`). Everything else answers `501`; an operation with no reply scripted too.
 - **Cargo features** are the API groups of the generated server. The default ones are the groups the mock scripts
