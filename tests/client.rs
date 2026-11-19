@@ -278,6 +278,10 @@ async fn an_unserved_operation_and_an_unscripted_one_are_501() {
         .call()
         .await
         .unwrap();
+    let models::CreateModeration200Response::CreateModerationResponse(moderation) = moderation
+    else {
+        panic!("a classification: {moderation:?}");
+    };
     assert!(!moderation.results[0].flagged);
 }
 
