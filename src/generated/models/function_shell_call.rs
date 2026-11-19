@@ -13,6 +13,7 @@ use serde::{Deserialize, Serialize};
 
 /// FunctionShellCall : A tool call that executes one or more shell commands in a managed environment.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, bon::Builder)]
+#[builder(state_mod = function_shell_call_builder, finish_fn(vis = "", name = build_internal))]
 pub struct FunctionShellCall {
     /// The type of the item. Always `shell_call`.  Defaults to `\"shell_call\"`.
     #[serde(rename = "type")]
@@ -34,7 +35,7 @@ pub struct FunctionShellCall {
     pub action: models::FunctionShellAction,
     #[serde(rename = "status")]
     pub status: models::FunctionShellCallStatus,
-    #[serde(rename = "environment", deserialize_with = "Option::deserialize")]
+    #[serde(rename = "environment", default)]
     pub environment: Option<models::FunctionShellCallEnvironment>,
     /// The ID of the entity that created this tool call.
     #[serde(rename = "created_by", skip_serializing_if = "Option::is_none")]
@@ -61,6 +62,21 @@ impl FunctionShellCall {
             environment,
             created_by: None,
         }
+    }
+}
+
+impl<S: function_shell_call_builder::State> FunctionShellCallBuilder<S>
+where
+    S::Type: function_shell_call_builder::IsSet,
+    S::Id: function_shell_call_builder::IsSet,
+    S::CallId: function_shell_call_builder::IsSet,
+    S::Action: function_shell_call_builder::IsSet,
+    S::Status: function_shell_call_builder::IsSet,
+{
+    /// Finish building and return the requested object
+    #[inline(always)]
+    pub fn build(self) -> FunctionShellCall {
+        self.build_internal()
     }
 }
 

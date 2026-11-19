@@ -13,6 +13,7 @@ use serde::{Deserialize, Serialize};
 
 /// ComputerUseApprovalRequestKindResourceBrowserAuthentication : A registered form awaiting the application's response.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, bon::Builder)]
+#[builder(state_mod = computer_use_approval_request_kind_resource_browser_authentication_builder, finish_fn(vis = "", name = build_internal))]
 pub struct ComputerUseApprovalRequestKindResourceBrowserAuthentication {
     /// The type of the object. Always `browser_authentication`.  Defaults to `\"browser_authentication\"`.
     #[serde(rename = "type")]
@@ -20,12 +21,12 @@ pub struct ComputerUseApprovalRequestKindResourceBrowserAuthentication {
     /// Why the agent needs the user to sign in.
     ///
     /// Validation: `minLength: 0`.
-    #[serde(rename = "reason", deserialize_with = "Option::deserialize")]
+    #[serde(rename = "reason", default)]
     pub reason: Option<String>,
     /// The registered form or frame origin where values will be entered.
     ///
     /// Validation: `minLength: 0`.
-    #[serde(rename = "credential_origin", deserialize_with = "Option::deserialize")]
+    #[serde(rename = "credential_origin", default)]
     pub credential_origin: Option<String>,
     /// Controls to render. All submitted values are sensitive.
     ///
@@ -55,6 +56,20 @@ impl ComputerUseApprovalRequestKindResourceBrowserAuthentication {
             fields,
             options,
         }
+    }
+}
+
+impl<S: computer_use_approval_request_kind_resource_browser_authentication_builder::State>
+    ComputerUseApprovalRequestKindResourceBrowserAuthenticationBuilder<S>
+where
+    S::Type: computer_use_approval_request_kind_resource_browser_authentication_builder::IsSet,
+    S::Fields: computer_use_approval_request_kind_resource_browser_authentication_builder::IsSet,
+    S::Options: computer_use_approval_request_kind_resource_browser_authentication_builder::IsSet,
+{
+    /// Finish building and return the requested object
+    #[inline(always)]
+    pub fn build(self) -> ComputerUseApprovalRequestKindResourceBrowserAuthentication {
+        self.build_internal()
     }
 }
 

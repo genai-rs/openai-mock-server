@@ -13,6 +13,7 @@ use serde::{Deserialize, Serialize};
 
 /// VaultCredentialAuthResourceMcpOauth : Public metadata for an OAuth credential; tokens and client secrets are never returned.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, bon::Builder)]
+#[builder(state_mod = vault_credential_auth_resource_mcp_oauth_builder, finish_fn(vis = "", name = build_internal))]
 pub struct VaultCredentialAuthResourceMcpOauth {
     /// The type of the object. Always `mcp_oauth`.  Defaults to `\"mcp_oauth\"`.
     #[serde(rename = "type")]
@@ -25,10 +26,10 @@ pub struct VaultCredentialAuthResourceMcpOauth {
     /// When the OAuth access token expires, as an RFC 3339 timestamp, if known.
     ///
     /// Validation: `minLength: 0`.
-    #[serde(rename = "expires_at", deserialize_with = "Option::deserialize")]
+    #[serde(rename = "expires_at", default)]
     pub expires_at: Option<String>,
     /// Public refresh metadata without refresh tokens or OAuth client secrets.
-    #[serde(rename = "refresh", deserialize_with = "Option::deserialize")]
+    #[serde(rename = "refresh", default)]
     pub refresh: Option<models::McpOauthRefreshResource>,
 }
 
@@ -46,6 +47,19 @@ impl VaultCredentialAuthResourceMcpOauth {
             expires_at,
             refresh,
         }
+    }
+}
+
+impl<S: vault_credential_auth_resource_mcp_oauth_builder::State>
+    VaultCredentialAuthResourceMcpOauthBuilder<S>
+where
+    S::Type: vault_credential_auth_resource_mcp_oauth_builder::IsSet,
+    S::McpServerUrl: vault_credential_auth_resource_mcp_oauth_builder::IsSet,
+{
+    /// Finish building and return the requested object
+    #[inline(always)]
+    pub fn build(self) -> VaultCredentialAuthResourceMcpOauth {
+        self.build_internal()
     }
 }
 

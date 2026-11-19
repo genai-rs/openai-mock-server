@@ -13,6 +13,7 @@ use serde::{Deserialize, Serialize};
 
 /// FunctionCallOutputItemResource : The result supplied for a function call.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, bon::Builder)]
+#[builder(state_mod = function_call_output_item_resource_builder, finish_fn(vis = "", name = build_internal))]
 pub struct FunctionCallOutputItemResource {
     /// The ID of the function call output item.
     ///
@@ -35,12 +36,12 @@ pub struct FunctionCallOutputItemResource {
     #[serde(rename = "status")]
     pub status: models::FunctionCallStatusResource,
     /// The function result, if the call succeeded.
-    #[serde(rename = "output", deserialize_with = "Option::deserialize")]
+    #[serde(rename = "output", default)]
     pub output: Option<models::FunctionCallOutputResource>,
     /// The error message, if the call failed.
     ///
     /// Validation: `minLength: 0`.
-    #[serde(rename = "error", deserialize_with = "Option::deserialize")]
+    #[serde(rename = "error", default)]
     pub error: Option<String>,
 }
 
@@ -64,6 +65,21 @@ impl FunctionCallOutputItemResource {
             output,
             error,
         }
+    }
+}
+
+impl<S: function_call_output_item_resource_builder::State> FunctionCallOutputItemResourceBuilder<S>
+where
+    S::Id: function_call_output_item_resource_builder::IsSet,
+    S::TurnId: function_call_output_item_resource_builder::IsSet,
+    S::Type: function_call_output_item_resource_builder::IsSet,
+    S::CallId: function_call_output_item_resource_builder::IsSet,
+    S::Status: function_call_output_item_resource_builder::IsSet,
+{
+    /// Finish building and return the requested object
+    #[inline(always)]
+    pub fn build(self) -> FunctionCallOutputItemResource {
+        self.build_internal()
     }
 }
 

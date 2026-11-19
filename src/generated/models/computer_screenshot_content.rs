@@ -13,15 +13,16 @@ use serde::{Deserialize, Serialize};
 
 /// ComputerScreenshotContent : A screenshot of a computer.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, bon::Builder)]
+#[builder(state_mod = computer_screenshot_content_builder, finish_fn(vis = "", name = build_internal))]
 pub struct ComputerScreenshotContent {
     /// Specifies the event type. For a computer screenshot, this property is always set to `computer_screenshot`.  Defaults to `\"computer_screenshot\"`.
     #[serde(rename = "type")]
     pub r#type: Type,
     /// The URL of the screenshot image.
-    #[serde(rename = "image_url", deserialize_with = "Option::deserialize")]
+    #[serde(rename = "image_url", default)]
     pub image_url: Option<String>,
     /// The identifier of an uploaded file that contains the screenshot.
-    #[serde(rename = "file_id", deserialize_with = "Option::deserialize")]
+    #[serde(rename = "file_id", default)]
     pub file_id: Option<String>,
     #[serde(rename = "detail")]
     pub detail: models::ImageDetail,
@@ -47,6 +48,18 @@ impl ComputerScreenshotContent {
             detail,
             prompt_cache_breakpoint: None,
         }
+    }
+}
+
+impl<S: computer_screenshot_content_builder::State> ComputerScreenshotContentBuilder<S>
+where
+    S::Type: computer_screenshot_content_builder::IsSet,
+    S::Detail: computer_screenshot_content_builder::IsSet,
+{
+    /// Finish building and return the requested object
+    #[inline(always)]
+    pub fn build(self) -> ComputerScreenshotContent {
+        self.build_internal()
     }
 }
 

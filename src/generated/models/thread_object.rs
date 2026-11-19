@@ -13,6 +13,7 @@ use serde::{Deserialize, Serialize};
 
 /// ThreadObject : Represents a thread that contains [messages](https://developers.openai.com/api/docs/assistants/migration).
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, bon::Builder)]
+#[builder(state_mod = thread_object_builder, finish_fn(vis = "", name = build_internal))]
 pub struct ThreadObject {
     /// The identifier, which can be referenced in API endpoints.
     #[serde(rename = "id")]
@@ -23,10 +24,10 @@ pub struct ThreadObject {
     /// The Unix timestamp (in seconds) for when the thread was created.
     #[serde(rename = "created_at", with = "super::unix_time")]
     pub created_at: jiff::Timestamp,
-    #[serde(rename = "tool_resources", deserialize_with = "Option::deserialize")]
+    #[serde(rename = "tool_resources", default)]
     pub tool_resources: Option<models::ThreadObjectToolResources>,
     /// Set of 16 key-value pairs that can be attached to an object. This can be useful for storing additional information about the object in a structured format, and querying for objects via API or the dashboard.  Keys are strings with a maximum length of 64 characters. Values are strings with a maximum length of 512 characters.
-    #[serde(rename = "metadata", deserialize_with = "Option::deserialize")]
+    #[serde(rename = "metadata", default)]
     pub metadata: Option<std::collections::HashMap<String, String>>,
 }
 
@@ -46,6 +47,19 @@ impl ThreadObject {
             tool_resources,
             metadata,
         }
+    }
+}
+
+impl<S: thread_object_builder::State> ThreadObjectBuilder<S>
+where
+    S::Id: thread_object_builder::IsSet,
+    S::Object: thread_object_builder::IsSet,
+    S::CreatedAt: thread_object_builder::IsSet,
+{
+    /// Finish building and return the requested object
+    #[inline(always)]
+    pub fn build(self) -> ThreadObject {
+        self.build_internal()
     }
 }
 

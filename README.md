@@ -45,7 +45,11 @@ assert!(mock.rejected().is_empty());
 - **Fixtures** for the common bodies: chat completions and tool calls, chunks, responses, function calls and their
   events, embeddings, models, files, batches, images, transcriptions, moderations.
 - **Recorded requests** as the generated request structs: the decoded body and the headers. Requests that did not
-  decode are listed by `rejected()`.
+  decode, or that break a validation keyword of the specification (`minimum`, `maxLength`, `pattern`, ...), are
+  answered with a `400` and listed by `rejected()`, with the path of each value (`body.dimensions`).
+- **Webhooks:** `server::webhooks` sends OpenAI's webhooks to an endpoint of the test, typed
+  (`Webhook::ResponseCompleted(...)`) and signed as OpenAI signs them (Standard Webhooks, with
+  `StandardWebhooksLayer`); `verify` checks them on the receiving side.
 - **Served:** chat completions, responses, embeddings, models, files, batches, images, audio, moderations and realtime
   calls (`op::SERVED`). Everything else answers `501`; an operation with no reply scripted too.
 - **Cargo features** are the API groups of the generated server. The default ones are the groups the mock scripts

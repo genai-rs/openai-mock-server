@@ -13,6 +13,7 @@ use serde::{Deserialize, Serialize};
 
 /// AdminApiKey : Represents an individual Admin API key in an org.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, bon::Builder)]
+#[builder(state_mod = admin_api_key_builder, finish_fn(vis = "", name = build_internal))]
 pub struct AdminApiKey {
     /// The object type, which is always `organization.admin_api_key`
     #[serde(rename = "object")]
@@ -35,7 +36,7 @@ pub struct AdminApiKey {
     #[serde(rename = "created_at", with = "super::unix_time")]
     pub created_at: jiff::Timestamp,
     /// The Unix timestamp (in seconds) of when the API key expires
-    #[serde(rename = "expires_at", with = "super::unix_time::option")]
+    #[serde(rename = "expires_at", default, with = "super::unix_time::option")]
     pub expires_at: Option<jiff::Timestamp>,
     /// The Unix timestamp (in seconds) of when the API key was last used
     #[serde(
@@ -69,6 +70,21 @@ impl AdminApiKey {
             last_used_at: None,
             owner,
         }
+    }
+}
+
+impl<S: admin_api_key_builder::State> AdminApiKeyBuilder<S>
+where
+    S::Object: admin_api_key_builder::IsSet,
+    S::Id: admin_api_key_builder::IsSet,
+    S::RedactedValue: admin_api_key_builder::IsSet,
+    S::CreatedAt: admin_api_key_builder::IsSet,
+    S::Owner: admin_api_key_builder::IsSet,
+{
+    /// Finish building and return the requested object
+    #[inline(always)]
+    pub fn build(self) -> AdminApiKey {
+        self.build_internal()
     }
 }
 

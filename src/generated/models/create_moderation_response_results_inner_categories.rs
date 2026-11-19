@@ -12,6 +12,7 @@ use serde::{Deserialize, Serialize};
 
 /// CreateModerationResponseResultsInnerCategories : A list of the categories, and whether they are flagged or not.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, bon::Builder)]
+#[builder(state_mod = create_moderation_response_results_inner_categories_builder, finish_fn(vis = "", name = build_internal))]
 pub struct CreateModerationResponseResultsInnerCategories {
     /// Content that expresses, incites, or promotes hate based on race, gender, ethnicity, religion, nationality, sexual orientation, disability status, or caste. Hateful content aimed at non-protected groups (e.g., chess players) is harassment.
     #[serde(rename = "hate")]
@@ -26,10 +27,10 @@ pub struct CreateModerationResponseResultsInnerCategories {
     #[serde(rename = "harassment/threatening")]
     pub harassment_slash_threatening: bool,
     /// Content that includes instructions or advice that facilitate the planning or execution of wrongdoing, or that gives advice or instruction on how to commit illicit acts. For example, \"how to shoplift\" would fit this category.
-    #[serde(rename = "illicit", deserialize_with = "Option::deserialize")]
+    #[serde(rename = "illicit", default)]
     pub illicit: Option<bool>,
     /// Content that includes instructions or advice that facilitate the planning or execution of wrongdoing that also includes violence, or that gives advice or instruction on the procurement of any weapon.
-    #[serde(rename = "illicit/violent", deserialize_with = "Option::deserialize")]
+    #[serde(rename = "illicit/violent", default)]
     pub illicit_slash_violent: Option<bool>,
     /// Content that promotes, encourages, or depicts acts of self-harm, such as suicide, cutting, and eating disorders.
     #[serde(rename = "self-harm")]
@@ -86,6 +87,30 @@ impl CreateModerationResponseResultsInnerCategories {
             violence,
             violence_slash_graphic,
         }
+    }
+}
+
+impl<S: create_moderation_response_results_inner_categories_builder::State>
+    CreateModerationResponseResultsInnerCategoriesBuilder<S>
+where
+    S::Hate: create_moderation_response_results_inner_categories_builder::IsSet,
+    S::HateSlashThreatening: create_moderation_response_results_inner_categories_builder::IsSet,
+    S::Harassment: create_moderation_response_results_inner_categories_builder::IsSet,
+    S::HarassmentSlashThreatening:
+        create_moderation_response_results_inner_categories_builder::IsSet,
+    S::SelfHarm: create_moderation_response_results_inner_categories_builder::IsSet,
+    S::SelfHarmSlashIntent: create_moderation_response_results_inner_categories_builder::IsSet,
+    S::SelfHarmSlashInstructions:
+        create_moderation_response_results_inner_categories_builder::IsSet,
+    S::Sexual: create_moderation_response_results_inner_categories_builder::IsSet,
+    S::SexualSlashMinors: create_moderation_response_results_inner_categories_builder::IsSet,
+    S::Violence: create_moderation_response_results_inner_categories_builder::IsSet,
+    S::ViolenceSlashGraphic: create_moderation_response_results_inner_categories_builder::IsSet,
+{
+    /// Finish building and return the requested object
+    #[inline(always)]
+    pub fn build(self) -> CreateModerationResponseResultsInnerCategories {
+        self.build_internal()
     }
 }
 

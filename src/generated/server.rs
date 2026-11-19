@@ -26,6 +26,13 @@
 //! the operation does not take) without calling the implementation; an implementation's error by
 //! [`ErrorHandler::server_error`] (a `500`).
 //!
+//! With `serverWebhooks`, [`webhooks`] sends the spec's webhooks to the endpoints receivers registered.
+//!
+//! With `serverValidation`, a request that decodes is validated before the implementation is called: the spec's
+//! validation keywords of its path and query parameters, of a form's fields, and of the models of its body (their
+//! `validate()`). A request that breaks one is answered by [`ErrorHandler::invalid_request`] with
+//! [`RequestError::invalid`]: a `400` listing every error.
+//!
 //! A request body is its model for JSON, a `String` for text, the bytes for anything else, and a form struct for
 //! `multipart/form-data` (with a `FilePart` per file) and `application/x-www-form-urlencoded`. A body the spec gives
 //! more than one kind of media type is an enum with a variant per kind, chosen by the request's `Content-Type`. A
@@ -136,6 +143,7 @@ pub struct RequestError {
     location: &'static str,
     name: Option<String>,
     message: String,
+    validation: Option<crate::models::validation::ValidationErrors>,
 }
 
 impl RequestError {
@@ -146,7 +154,45 @@ impl RequestError {
             location,
             name: name.map(str::to_owned),
             message: message.into(),
+            validation: None,
         }
+    }
+
+    /// A request that decodes but breaks validation keywords of the spec: a `400`, at the location of the first
+    /// error (`path`, `query` or `body`; the parameter as its `name`), whose message lists every error. The errors
+    /// are paths below `path.<name>`, `query.<name>` and `body` (`body.messages[0].content`).
+    pub fn invalid(errors: crate::models::validation::ValidationErrors) -> Self {
+        let first = errors
+            .iter()
+            .next()
+            .map(|error| error.path.as_str())
+            .unwrap_or("");
+        let (head, rest) = match first.split_once('.') {
+            Some((head, rest)) => (head, Some(rest)),
+            None => (first, None),
+        };
+        let location = match head {
+            "path" => "path",
+            "query" => "query",
+            _ => "body",
+        };
+        let name = match location {
+            "body" => None,
+            _ => rest.and_then(|rest| rest.split(['.', '[']).next()),
+        };
+        let message = errors
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
+            .join("; ");
+        let mut error = RequestError::new(location, name, message);
+        error.validation = Some(errors);
+        error
+    }
+
+    /// Every error, for a request that breaks validation keywords ([`RequestError::invalid`]).
+    pub fn validation_errors(&self) -> Option<&crate::models::validation::ValidationErrors> {
+        self.validation.as_ref()
     }
 
     /// A body of a media type the operation does not take (`None`: the request has no `Content-Type`): a `415`.
@@ -191,6 +237,10 @@ impl RequestError {
 
 impl std::fmt::Display for RequestError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if self.validation.is_some() {
+            // every error names its own path
+            return f.write_str(&self.message);
+        }
         match &self.name {
             Some(name) => write!(
                 f,
@@ -210,6 +260,8 @@ pub trait ErrorHandler {
     /// The response to a request that does not decode. By default the error's [`status`](RequestError::status) (a
     /// `400`, or a `415` for a body of a media type the operation does not take) with the JSON body
     /// `{"error": {"message": "...", "location": "query", "name": "limit"}}` (`name` only for a parameter).
+    /// A request that breaks validation keywords adds `"errors"`, one `{"path": ..., "rule": ..., "message": ...}`
+    /// per error.
     fn invalid_request(&self, error: RequestError) -> axum::response::Response {
         let mut body = serde_json::Map::new();
         body.insert(
@@ -225,6 +277,28 @@ pub trait ErrorHandler {
                 "name".to_owned(),
                 serde_json::Value::String(name.to_owned()),
             );
+        }
+        if let Some(errors) = error.validation_errors() {
+            let errors = errors
+                .iter()
+                .map(|error| {
+                    let mut entry = serde_json::Map::new();
+                    entry.insert(
+                        "path".to_owned(),
+                        serde_json::Value::String(error.path.clone()),
+                    );
+                    entry.insert(
+                        "rule".to_owned(),
+                        serde_json::Value::String(error.rule.to_string()),
+                    );
+                    entry.insert(
+                        "message".to_owned(),
+                        serde_json::Value::String(error.to_string()),
+                    );
+                    serde_json::Value::Object(entry)
+                })
+                .collect();
+            body.insert("errors".to_owned(), serde_json::Value::Array(errors));
         }
         error_response(error.status(), body)
     }
@@ -249,6 +323,33 @@ pub trait ErrorHandler {
         error_response(http::StatusCode::INTERNAL_SERVER_ERROR, body)
     }
 }
+
+/// `pattern` (`serverValidation`): the string contains a match. A pattern `regex` could not compile is `None` and not
+/// checked.
+// with API features, the groups that check a pattern may all be off
+#[allow(dead_code)]
+fn pattern(
+    value: &str,
+    regex: &std::sync::LazyLock<Option<regex::Regex>>,
+    source: &'static str,
+    path: &crate::models::validation::Path<'_>,
+    errors: &mut Vec<crate::models::validation::ValidationError>,
+) {
+    if let Some(regex) = &**regex {
+        if !regex.is_match(value) {
+            let mut error = crate::models::validation::ValidationError::new(
+                crate::models::validation::Rule::Pattern(source),
+                format!("{value:?}"),
+            );
+            error.path = path.to_string();
+            errors.push(error);
+        }
+    }
+}
+
+#[allow(dead_code)]
+static PATTERN_0: std::sync::LazyLock<Option<regex::Regex>> =
+    std::sync::LazyLock::new(|| regex::Regex::new(r"^live_[A-Za-z0-9_-]{1,128}$").ok());
 
 /// Serves `api`, an implementation of every trait of the server, with its error handler: a route per operation.
 pub fn router<I>(api: I) -> axum::Router
@@ -2731,6 +2832,23 @@ pub mod agents_api {
         pub headers: http::HeaderMap,
     }
 
+    /// The spec's validation keywords of the parameters, at `path.<name>` and `query.<name>`, and of the body, at
+    /// `body`.
+    #[cfg(feature = "agents")]
+    impl crate::models::validation::Validate for CreateAgentRequest {
+        fn validate_into(
+            &self,
+            path: &crate::models::validation::Path<'_>,
+            errors: &mut Vec<crate::models::validation::ValidationError>,
+        ) {
+            crate::models::validation::Validate::validate_into(
+                &self.body,
+                &path.field("body"),
+                errors,
+            );
+        }
+    }
+
     /// The responses of [`AgentsApi::create_agent`], one per status the spec declares.
     #[cfg(feature = "agents")]
     #[derive(Clone, Debug)]
@@ -2798,6 +2916,9 @@ pub mod agents_api {
             Ok(request) => request,
             Err(error) => return api.invalid_request(error),
         };
+        if let Err(errors) = crate::models::validation::Validate::validate(&request) {
+            return api.invalid_request(super::RequestError::invalid(errors));
+        }
         match api.create_agent(request).await {
             Ok(response) => axum::response::IntoResponse::into_response(response),
             Err(error) => api.server_error(error),
@@ -2823,6 +2944,23 @@ pub mod agents_api {
         pub body: models::CreateAutomationParams,
         /// The request's headers, with its header and cookie parameters and credentials.
         pub headers: http::HeaderMap,
+    }
+
+    /// The spec's validation keywords of the parameters, at `path.<name>` and `query.<name>`, and of the body, at
+    /// `body`.
+    #[cfg(feature = "agents")]
+    impl crate::models::validation::Validate for CreateAgentAutomationRequest {
+        fn validate_into(
+            &self,
+            path: &crate::models::validation::Path<'_>,
+            errors: &mut Vec<crate::models::validation::ValidationError>,
+        ) {
+            crate::models::validation::Validate::validate_into(
+                &self.body,
+                &path.field("body"),
+                errors,
+            );
+        }
     }
 
     /// The responses of [`AgentsApi::create_agent_automation`], one per status the spec declares.
@@ -2892,6 +3030,9 @@ pub mod agents_api {
             Ok(request) => request,
             Err(error) => return api.invalid_request(error),
         };
+        if let Err(errors) = crate::models::validation::Validate::validate(&request) {
+            return api.invalid_request(super::RequestError::invalid(errors));
+        }
         match api.create_agent_automation(request).await {
             Ok(response) => axum::response::IntoResponse::into_response(response),
             Err(error) => api.server_error(error),
@@ -2917,6 +3058,25 @@ pub mod agents_api {
         pub automation_id: String,
         /// The request's headers, with its header and cookie parameters and credentials.
         pub headers: http::HeaderMap,
+    }
+
+    /// The spec's validation keywords of the parameters, at `path.<name>` and `query.<name>`, and of the body, at
+    /// `body`.
+    #[cfg(feature = "agents")]
+    impl crate::models::validation::Validate for CreateAgentAutomationInvocationRequest {
+        fn validate_into(
+            &self,
+            path: &crate::models::validation::Path<'_>,
+            errors: &mut Vec<crate::models::validation::ValidationError>,
+        ) {
+            crate::models::validation::length(
+                &self.automation_id,
+                Some(0),
+                Some(1048576),
+                &path.field("path").field("automation_id"),
+                errors,
+            );
+        }
     }
 
     /// The responses of [`AgentsApi::create_agent_automation_invocation`], one per status the spec declares.
@@ -2999,6 +3159,9 @@ pub mod agents_api {
             Ok(request) => request,
             Err(error) => return api.invalid_request(error),
         };
+        if let Err(errors) = crate::models::validation::Validate::validate(&request) {
+            return api.invalid_request(super::RequestError::invalid(errors));
+        }
         match api.create_agent_automation_invocation(request).await {
             Ok(response) => axum::response::IntoResponse::into_response(response),
             Err(error) => api.server_error(error),
@@ -3024,6 +3187,23 @@ pub mod agents_api {
         pub body: models::CreateAgentEnvironmentParams,
         /// The request's headers, with its header and cookie parameters and credentials.
         pub headers: http::HeaderMap,
+    }
+
+    /// The spec's validation keywords of the parameters, at `path.<name>` and `query.<name>`, and of the body, at
+    /// `body`.
+    #[cfg(feature = "agents")]
+    impl crate::models::validation::Validate for CreateAgentEnvironmentRequest {
+        fn validate_into(
+            &self,
+            path: &crate::models::validation::Path<'_>,
+            errors: &mut Vec<crate::models::validation::ValidationError>,
+        ) {
+            crate::models::validation::Validate::validate_into(
+                &self.body,
+                &path.field("body"),
+                errors,
+            );
+        }
     }
 
     /// The responses of [`AgentsApi::create_agent_environment`], one per status the spec declares.
@@ -3098,6 +3278,9 @@ pub mod agents_api {
             Ok(request) => request,
             Err(error) => return api.invalid_request(error),
         };
+        if let Err(errors) = crate::models::validation::Validate::validate(&request) {
+            return api.invalid_request(super::RequestError::invalid(errors));
+        }
         match api.create_agent_environment(request).await {
             Ok(response) => axum::response::IntoResponse::into_response(response),
             Err(error) => api.server_error(error),
@@ -3125,6 +3308,30 @@ pub mod agents_api {
         pub body: Option<models::HostedEnvironmentFileParam>,
         /// The request's headers, with its header and cookie parameters and credentials.
         pub headers: http::HeaderMap,
+    }
+
+    /// The spec's validation keywords of the parameters, at `path.<name>` and `query.<name>`, and of the body, at
+    /// `body`.
+    #[cfg(feature = "agents")]
+    impl crate::models::validation::Validate for CreateAgentEnvironmentFileRequest {
+        fn validate_into(
+            &self,
+            path: &crate::models::validation::Path<'_>,
+            errors: &mut Vec<crate::models::validation::ValidationError>,
+        ) {
+            crate::models::validation::length(
+                &self.environment_id,
+                Some(0),
+                Some(1048576),
+                &path.field("path").field("environment_id"),
+                errors,
+            );
+            crate::models::validation::Validate::validate_into(
+                &self.body,
+                &path.field("body"),
+                errors,
+            );
+        }
     }
 
     /// The responses of [`AgentsApi::create_agent_environment_file`], one per status the spec declares.
@@ -3213,6 +3420,9 @@ pub mod agents_api {
             Ok(request) => request,
             Err(error) => return api.invalid_request(error),
         };
+        if let Err(errors) = crate::models::validation::Validate::validate(&request) {
+            return api.invalid_request(super::RequestError::invalid(errors));
+        }
         match api.create_agent_environment_file(request).await {
             Ok(response) => axum::response::IntoResponse::into_response(response),
             Err(error) => api.server_error(error),
@@ -3242,6 +3452,23 @@ pub mod agents_api {
         pub body: Option<models::CreateEnvironmentTemplateParams>,
         /// The request's headers, with its header and cookie parameters and credentials.
         pub headers: http::HeaderMap,
+    }
+
+    /// The spec's validation keywords of the parameters, at `path.<name>` and `query.<name>`, and of the body, at
+    /// `body`.
+    #[cfg(feature = "agents")]
+    impl crate::models::validation::Validate for CreateAgentEnvironmentTemplateRequest {
+        fn validate_into(
+            &self,
+            path: &crate::models::validation::Path<'_>,
+            errors: &mut Vec<crate::models::validation::ValidationError>,
+        ) {
+            crate::models::validation::Validate::validate_into(
+                &self.body,
+                &path.field("body"),
+                errors,
+            );
+        }
     }
 
     /// The responses of [`AgentsApi::create_agent_environment_template`], one per status the spec declares.
@@ -3306,6 +3533,9 @@ pub mod agents_api {
             Ok(request) => request,
             Err(error) => return api.invalid_request(error),
         };
+        if let Err(errors) = crate::models::validation::Validate::validate(&request) {
+            return api.invalid_request(super::RequestError::invalid(errors));
+        }
         match api.create_agent_environment_template(request).await {
             Ok(response) => axum::response::IntoResponse::into_response(response),
             Err(error) => api.server_error(error),
@@ -3331,6 +3561,23 @@ pub mod agents_api {
         pub body: Option<models::CreateAgentSessionParams>,
         /// The request's headers, with its header and cookie parameters and credentials.
         pub headers: http::HeaderMap,
+    }
+
+    /// The spec's validation keywords of the parameters, at `path.<name>` and `query.<name>`, and of the body, at
+    /// `body`.
+    #[cfg(feature = "agents")]
+    impl crate::models::validation::Validate for CreateAgentSessionRequest {
+        fn validate_into(
+            &self,
+            path: &crate::models::validation::Path<'_>,
+            errors: &mut Vec<crate::models::validation::ValidationError>,
+        ) {
+            crate::models::validation::Validate::validate_into(
+                &self.body,
+                &path.field("body"),
+                errors,
+            );
+        }
     }
 
     /// The responses of [`AgentsApi::create_agent_session`], one per status the spec declares.
@@ -3413,6 +3660,9 @@ pub mod agents_api {
             Ok(request) => request,
             Err(error) => return api.invalid_request(error),
         };
+        if let Err(errors) = crate::models::validation::Validate::validate(&request) {
+            return api.invalid_request(super::RequestError::invalid(errors));
+        }
         match api.create_agent_session(request).await {
             Ok(response) => axum::response::IntoResponse::into_response(response),
             Err(error) => api.server_error(error),
@@ -3440,6 +3690,30 @@ pub mod agents_api {
         pub body: Option<models::CreateSessionEventsParams>,
         /// The request's headers, with its header and cookie parameters and credentials.
         pub headers: http::HeaderMap,
+    }
+
+    /// The spec's validation keywords of the parameters, at `path.<name>` and `query.<name>`, and of the body, at
+    /// `body`.
+    #[cfg(feature = "agents")]
+    impl crate::models::validation::Validate for CreateAgentSessionEventsRequest {
+        fn validate_into(
+            &self,
+            path: &crate::models::validation::Path<'_>,
+            errors: &mut Vec<crate::models::validation::ValidationError>,
+        ) {
+            crate::models::validation::length(
+                &self.session_id,
+                Some(0),
+                Some(1048576),
+                &path.field("path").field("session_id"),
+                errors,
+            );
+            crate::models::validation::Validate::validate_into(
+                &self.body,
+                &path.field("body"),
+                errors,
+            );
+        }
     }
 
     /// The responses of [`AgentsApi::create_agent_session_events`], one per status the spec declares.
@@ -3523,6 +3797,9 @@ pub mod agents_api {
             Ok(request) => request,
             Err(error) => return api.invalid_request(error),
         };
+        if let Err(errors) = crate::models::validation::Validate::validate(&request) {
+            return api.invalid_request(super::RequestError::invalid(errors));
+        }
         match api.create_agent_session_events(request).await {
             Ok(response) => axum::response::IntoResponse::into_response(response),
             Err(error) => api.server_error(error),
@@ -3550,6 +3827,25 @@ pub mod agents_api {
         pub agent_id: String,
         /// The request's headers, with its header and cookie parameters and credentials.
         pub headers: http::HeaderMap,
+    }
+
+    /// The spec's validation keywords of the parameters, at `path.<name>` and `query.<name>`, and of the body, at
+    /// `body`.
+    #[cfg(feature = "agents")]
+    impl crate::models::validation::Validate for DeleteAgentRequest {
+        fn validate_into(
+            &self,
+            path: &crate::models::validation::Path<'_>,
+            errors: &mut Vec<crate::models::validation::ValidationError>,
+        ) {
+            crate::models::validation::length(
+                &self.agent_id,
+                Some(0),
+                Some(1048576),
+                &path.field("path").field("agent_id"),
+                errors,
+            );
+        }
     }
 
     /// The responses of [`AgentsApi::delete_agent`], one per status the spec declares.
@@ -3632,6 +3928,9 @@ pub mod agents_api {
             Ok(request) => request,
             Err(error) => return api.invalid_request(error),
         };
+        if let Err(errors) = crate::models::validation::Validate::validate(&request) {
+            return api.invalid_request(super::RequestError::invalid(errors));
+        }
         match api.delete_agent(request).await {
             Ok(response) => axum::response::IntoResponse::into_response(response),
             Err(error) => api.server_error(error),
@@ -3657,6 +3956,25 @@ pub mod agents_api {
         pub automation_id: String,
         /// The request's headers, with its header and cookie parameters and credentials.
         pub headers: http::HeaderMap,
+    }
+
+    /// The spec's validation keywords of the parameters, at `path.<name>` and `query.<name>`, and of the body, at
+    /// `body`.
+    #[cfg(feature = "agents")]
+    impl crate::models::validation::Validate for DeleteAgentAutomationRequest {
+        fn validate_into(
+            &self,
+            path: &crate::models::validation::Path<'_>,
+            errors: &mut Vec<crate::models::validation::ValidationError>,
+        ) {
+            crate::models::validation::length(
+                &self.automation_id,
+                Some(0),
+                Some(1048576),
+                &path.field("path").field("automation_id"),
+                errors,
+            );
+        }
     }
 
     /// The responses of [`AgentsApi::delete_agent_automation`], one per status the spec declares.
@@ -3739,6 +4057,9 @@ pub mod agents_api {
             Ok(request) => request,
             Err(error) => return api.invalid_request(error),
         };
+        if let Err(errors) = crate::models::validation::Validate::validate(&request) {
+            return api.invalid_request(super::RequestError::invalid(errors));
+        }
         match api.delete_agent_automation(request).await {
             Ok(response) => axum::response::IntoResponse::into_response(response),
             Err(error) => api.server_error(error),
@@ -3764,6 +4085,25 @@ pub mod agents_api {
         pub environment_template_id: String,
         /// The request's headers, with its header and cookie parameters and credentials.
         pub headers: http::HeaderMap,
+    }
+
+    /// The spec's validation keywords of the parameters, at `path.<name>` and `query.<name>`, and of the body, at
+    /// `body`.
+    #[cfg(feature = "agents")]
+    impl crate::models::validation::Validate for DeleteAgentEnvironmentTemplateRequest {
+        fn validate_into(
+            &self,
+            path: &crate::models::validation::Path<'_>,
+            errors: &mut Vec<crate::models::validation::ValidationError>,
+        ) {
+            crate::models::validation::length(
+                &self.environment_template_id,
+                Some(0),
+                Some(1048576),
+                &path.field("path").field("environment_template_id"),
+                errors,
+            );
+        }
     }
 
     /// The responses of [`AgentsApi::delete_agent_environment_template`], one per status the spec declares.
@@ -3846,6 +4186,9 @@ pub mod agents_api {
             Ok(request) => request,
             Err(error) => return api.invalid_request(error),
         };
+        if let Err(errors) = crate::models::validation::Validate::validate(&request) {
+            return api.invalid_request(super::RequestError::invalid(errors));
+        }
         match api.delete_agent_environment_template(request).await {
             Ok(response) => axum::response::IntoResponse::into_response(response),
             Err(error) => api.server_error(error),
@@ -3876,6 +4219,25 @@ pub mod agents_api {
         pub session_id: String,
         /// The request's headers, with its header and cookie parameters and credentials.
         pub headers: http::HeaderMap,
+    }
+
+    /// The spec's validation keywords of the parameters, at `path.<name>` and `query.<name>`, and of the body, at
+    /// `body`.
+    #[cfg(feature = "agents")]
+    impl crate::models::validation::Validate for DeleteAgentSessionRequest {
+        fn validate_into(
+            &self,
+            path: &crate::models::validation::Path<'_>,
+            errors: &mut Vec<crate::models::validation::ValidationError>,
+        ) {
+            crate::models::validation::length(
+                &self.session_id,
+                Some(0),
+                Some(1048576),
+                &path.field("path").field("session_id"),
+                errors,
+            );
+        }
     }
 
     /// The responses of [`AgentsApi::delete_agent_session`], one per status the spec declares.
@@ -3958,6 +4320,9 @@ pub mod agents_api {
             Ok(request) => request,
             Err(error) => return api.invalid_request(error),
         };
+        if let Err(errors) = crate::models::validation::Validate::validate(&request) {
+            return api.invalid_request(super::RequestError::invalid(errors));
+        }
         match api.delete_agent_session(request).await {
             Ok(response) => axum::response::IntoResponse::into_response(response),
             Err(error) => api.server_error(error),
@@ -3985,6 +4350,32 @@ pub mod agents_api {
         pub artifact_id: String,
         /// The request's headers, with its header and cookie parameters and credentials.
         pub headers: http::HeaderMap,
+    }
+
+    /// The spec's validation keywords of the parameters, at `path.<name>` and `query.<name>`, and of the body, at
+    /// `body`.
+    #[cfg(feature = "agents")]
+    impl crate::models::validation::Validate for DeleteAgentSessionArtifactRequest {
+        fn validate_into(
+            &self,
+            path: &crate::models::validation::Path<'_>,
+            errors: &mut Vec<crate::models::validation::ValidationError>,
+        ) {
+            crate::models::validation::length(
+                &self.session_id,
+                Some(0),
+                Some(1048576),
+                &path.field("path").field("session_id"),
+                errors,
+            );
+            crate::models::validation::length(
+                &self.artifact_id,
+                Some(0),
+                Some(1048576),
+                &path.field("path").field("artifact_id"),
+                errors,
+            );
+        }
     }
 
     /// The responses of [`AgentsApi::delete_agent_session_artifact`], one per status the spec declares.
@@ -4067,6 +4458,9 @@ pub mod agents_api {
             Ok(request) => request,
             Err(error) => return api.invalid_request(error),
         };
+        if let Err(errors) = crate::models::validation::Validate::validate(&request) {
+            return api.invalid_request(super::RequestError::invalid(errors));
+        }
         match api.delete_agent_session_artifact(request).await {
             Ok(response) => axum::response::IntoResponse::into_response(response),
             Err(error) => api.server_error(error),
@@ -4093,6 +4487,25 @@ pub mod agents_api {
         pub automation_id: String,
         /// The request's headers, with its header and cookie parameters and credentials.
         pub headers: http::HeaderMap,
+    }
+
+    /// The spec's validation keywords of the parameters, at `path.<name>` and `query.<name>`, and of the body, at
+    /// `body`.
+    #[cfg(feature = "agents")]
+    impl crate::models::validation::Validate for GetAgentAutomationRequest {
+        fn validate_into(
+            &self,
+            path: &crate::models::validation::Path<'_>,
+            errors: &mut Vec<crate::models::validation::ValidationError>,
+        ) {
+            crate::models::validation::length(
+                &self.automation_id,
+                Some(0),
+                Some(1048576),
+                &path.field("path").field("automation_id"),
+                errors,
+            );
+        }
     }
 
     /// The responses of [`AgentsApi::get_agent_automation`], one per status the spec declares.
@@ -4175,6 +4588,9 @@ pub mod agents_api {
             Ok(request) => request,
             Err(error) => return api.invalid_request(error),
         };
+        if let Err(errors) = crate::models::validation::Validate::validate(&request) {
+            return api.invalid_request(super::RequestError::invalid(errors));
+        }
         match api.get_agent_automation(request).await {
             Ok(response) => axum::response::IntoResponse::into_response(response),
             Err(error) => api.server_error(error),
@@ -4202,6 +4618,32 @@ pub mod agents_api {
         pub invocation_id: String,
         /// The request's headers, with its header and cookie parameters and credentials.
         pub headers: http::HeaderMap,
+    }
+
+    /// The spec's validation keywords of the parameters, at `path.<name>` and `query.<name>`, and of the body, at
+    /// `body`.
+    #[cfg(feature = "agents")]
+    impl crate::models::validation::Validate for GetAgentAutomationInvocationRequest {
+        fn validate_into(
+            &self,
+            path: &crate::models::validation::Path<'_>,
+            errors: &mut Vec<crate::models::validation::ValidationError>,
+        ) {
+            crate::models::validation::length(
+                &self.automation_id,
+                Some(0),
+                Some(1048576),
+                &path.field("path").field("automation_id"),
+                errors,
+            );
+            crate::models::validation::length(
+                &self.invocation_id,
+                Some(0),
+                Some(1048576),
+                &path.field("path").field("invocation_id"),
+                errors,
+            );
+        }
     }
 
     /// The responses of [`AgentsApi::get_agent_automation_invocation`], one per status the spec declares.
@@ -4284,6 +4726,9 @@ pub mod agents_api {
             Ok(request) => request,
             Err(error) => return api.invalid_request(error),
         };
+        if let Err(errors) = crate::models::validation::Validate::validate(&request) {
+            return api.invalid_request(super::RequestError::invalid(errors));
+        }
         match api.get_agent_automation_invocation(request).await {
             Ok(response) => axum::response::IntoResponse::into_response(response),
             Err(error) => api.server_error(error),
@@ -4316,6 +4761,48 @@ pub mod agents_api {
         pub after: Option<String>,
         /// The request's headers, with its header and cookie parameters and credentials.
         pub headers: http::HeaderMap,
+    }
+
+    /// The spec's validation keywords of the parameters, at `path.<name>` and `query.<name>`, and of the body, at
+    /// `body`.
+    #[cfg(feature = "agents")]
+    impl crate::models::validation::Validate for ListAgentAutomationInvocationsRequest {
+        fn validate_into(
+            &self,
+            path: &crate::models::validation::Path<'_>,
+            errors: &mut Vec<crate::models::validation::ValidationError>,
+        ) {
+            crate::models::validation::length(
+                &self.automation_id,
+                Some(0),
+                Some(1048576),
+                &path.field("path").field("automation_id"),
+                errors,
+            );
+            if let Some(value0) = &self.limit {
+                crate::models::validation::minimum(
+                    *value0,
+                    1,
+                    &path.field("query").field("limit"),
+                    errors,
+                );
+                crate::models::validation::maximum(
+                    *value0,
+                    100,
+                    &path.field("query").field("limit"),
+                    errors,
+                );
+            }
+            if let Some(value0) = &self.after {
+                crate::models::validation::length(
+                    value0,
+                    Some(0),
+                    Some(1048576),
+                    &path.field("query").field("after"),
+                    errors,
+                );
+            }
+        }
     }
 
     /// The responses of [`AgentsApi::list_agent_automation_invocations`], one per status the spec declares.
@@ -4405,6 +4892,9 @@ pub mod agents_api {
             Ok(request) => request,
             Err(error) => return api.invalid_request(error),
         };
+        if let Err(errors) = crate::models::validation::Validate::validate(&request) {
+            return api.invalid_request(super::RequestError::invalid(errors));
+        }
         match api.list_agent_automation_invocations(request).await {
             Ok(response) => axum::response::IntoResponse::into_response(response),
             Err(error) => api.server_error(error),
@@ -4445,6 +4935,50 @@ pub mod agents_api {
         pub session_id: Option<String>,
         /// The request's headers, with its header and cookie parameters and credentials.
         pub headers: http::HeaderMap,
+    }
+
+    /// The spec's validation keywords of the parameters, at `path.<name>` and `query.<name>`, and of the body, at
+    /// `body`.
+    #[cfg(feature = "agents")]
+    impl crate::models::validation::Validate for ListAgentAutomationsRequest {
+        fn validate_into(
+            &self,
+            path: &crate::models::validation::Path<'_>,
+            errors: &mut Vec<crate::models::validation::ValidationError>,
+        ) {
+            if let Some(value0) = &self.limit {
+                crate::models::validation::minimum(
+                    *value0,
+                    1,
+                    &path.field("query").field("limit"),
+                    errors,
+                );
+                crate::models::validation::maximum(
+                    *value0,
+                    100,
+                    &path.field("query").field("limit"),
+                    errors,
+                );
+            }
+            if let Some(value0) = &self.after {
+                crate::models::validation::length(
+                    value0,
+                    Some(0),
+                    Some(1048576),
+                    &path.field("query").field("after"),
+                    errors,
+                );
+            }
+            if let Some(value0) = &self.session_id {
+                crate::models::validation::length(
+                    value0,
+                    Some(0),
+                    Some(1048576),
+                    &path.field("query").field("session_id"),
+                    errors,
+                );
+            }
+        }
     }
 
     /// The responses of [`AgentsApi::list_agent_automations`], one per status the spec declares.
@@ -4520,6 +5054,9 @@ pub mod agents_api {
             Ok(request) => request,
             Err(error) => return api.invalid_request(error),
         };
+        if let Err(errors) = crate::models::validation::Validate::validate(&request) {
+            return api.invalid_request(super::RequestError::invalid(errors));
+        }
         match api.list_agent_automations(request).await {
             Ok(response) => axum::response::IntoResponse::into_response(response),
             Err(error) => api.server_error(error),
@@ -4561,6 +5098,57 @@ pub mod agents_api {
         pub page: Option<String>,
         /// The request's headers, with its header and cookie parameters and credentials.
         pub headers: http::HeaderMap,
+    }
+
+    /// The spec's validation keywords of the parameters, at `path.<name>` and `query.<name>`, and of the body, at
+    /// `body`.
+    #[cfg(feature = "agents")]
+    impl crate::models::validation::Validate for ListAgentEnvironmentFilesRequest {
+        fn validate_into(
+            &self,
+            path: &crate::models::validation::Path<'_>,
+            errors: &mut Vec<crate::models::validation::ValidationError>,
+        ) {
+            crate::models::validation::length(
+                &self.environment_id,
+                Some(0),
+                Some(1048576),
+                &path.field("path").field("environment_id"),
+                errors,
+            );
+            if let Some(value0) = &self.path {
+                crate::models::validation::length(
+                    value0,
+                    Some(0),
+                    Some(1048576),
+                    &path.field("query").field("path"),
+                    errors,
+                );
+            }
+            if let Some(value0) = &self.limit {
+                crate::models::validation::minimum(
+                    *value0,
+                    1,
+                    &path.field("query").field("limit"),
+                    errors,
+                );
+                crate::models::validation::maximum(
+                    *value0,
+                    100,
+                    &path.field("query").field("limit"),
+                    errors,
+                );
+            }
+            if let Some(value0) = &self.page {
+                crate::models::validation::length(
+                    value0,
+                    Some(0),
+                    Some(1048576),
+                    &path.field("query").field("page"),
+                    errors,
+                );
+            }
+        }
     }
 
     /// The responses of [`AgentsApi::list_agent_environment_files`], one per status the spec declares.
@@ -4645,6 +5233,9 @@ pub mod agents_api {
             Ok(request) => request,
             Err(error) => return api.invalid_request(error),
         };
+        if let Err(errors) = crate::models::validation::Validate::validate(&request) {
+            return api.invalid_request(super::RequestError::invalid(errors));
+        }
         match api.list_agent_environment_files(request).await {
             Ok(response) => axum::response::IntoResponse::into_response(response),
             Err(error) => api.server_error(error),
@@ -4686,6 +5277,41 @@ pub mod agents_api {
         pub after: Option<String>,
         /// The request's headers, with its header and cookie parameters and credentials.
         pub headers: http::HeaderMap,
+    }
+
+    /// The spec's validation keywords of the parameters, at `path.<name>` and `query.<name>`, and of the body, at
+    /// `body`.
+    #[cfg(feature = "agents")]
+    impl crate::models::validation::Validate for ListAgentEnvironmentTemplatesRequest {
+        fn validate_into(
+            &self,
+            path: &crate::models::validation::Path<'_>,
+            errors: &mut Vec<crate::models::validation::ValidationError>,
+        ) {
+            if let Some(value0) = &self.limit {
+                crate::models::validation::minimum(
+                    *value0,
+                    1,
+                    &path.field("query").field("limit"),
+                    errors,
+                );
+                crate::models::validation::maximum(
+                    *value0,
+                    100,
+                    &path.field("query").field("limit"),
+                    errors,
+                );
+            }
+            if let Some(value0) = &self.after {
+                crate::models::validation::length(
+                    value0,
+                    Some(0),
+                    Some(1048576),
+                    &path.field("query").field("after"),
+                    errors,
+                );
+            }
+        }
     }
 
     /// The responses of [`AgentsApi::list_agent_environment_templates`], one per status the spec declares.
@@ -4751,6 +5377,9 @@ pub mod agents_api {
             Ok(request) => request,
             Err(error) => return api.invalid_request(error),
         };
+        if let Err(errors) = crate::models::validation::Validate::validate(&request) {
+            return api.invalid_request(super::RequestError::invalid(errors));
+        }
         match api.list_agent_environment_templates(request).await {
             Ok(response) => axum::response::IntoResponse::into_response(response),
             Err(error) => api.server_error(error),
@@ -4789,6 +5418,41 @@ pub mod agents_api {
         pub r#type: Option<models::EnvironmentTypeParam>,
         /// The request's headers, with its header and cookie parameters and credentials.
         pub headers: http::HeaderMap,
+    }
+
+    /// The spec's validation keywords of the parameters, at `path.<name>` and `query.<name>`, and of the body, at
+    /// `body`.
+    #[cfg(feature = "agents")]
+    impl crate::models::validation::Validate for ListAgentEnvironmentsRequest {
+        fn validate_into(
+            &self,
+            path: &crate::models::validation::Path<'_>,
+            errors: &mut Vec<crate::models::validation::ValidationError>,
+        ) {
+            if let Some(value0) = &self.limit {
+                crate::models::validation::minimum(
+                    *value0,
+                    1,
+                    &path.field("query").field("limit"),
+                    errors,
+                );
+                crate::models::validation::maximum(
+                    *value0,
+                    100,
+                    &path.field("query").field("limit"),
+                    errors,
+                );
+            }
+            if let Some(value0) = &self.after {
+                crate::models::validation::length(
+                    value0,
+                    Some(0),
+                    Some(1048576),
+                    &path.field("query").field("after"),
+                    errors,
+                );
+            }
+        }
     }
 
     /// The responses of [`AgentsApi::list_agent_environments`], one per status the spec declares.
@@ -4859,6 +5523,9 @@ pub mod agents_api {
             Ok(request) => request,
             Err(error) => return api.invalid_request(error),
         };
+        if let Err(errors) = crate::models::validation::Validate::validate(&request) {
+            return api.invalid_request(super::RequestError::invalid(errors));
+        }
         match api.list_agent_environments(request).await {
             Ok(response) => axum::response::IntoResponse::into_response(response),
             Err(error) => api.server_error(error),
@@ -4905,6 +5572,57 @@ pub mod agents_api {
         pub environment_id: Option<String>,
         /// The request's headers, with its header and cookie parameters and credentials.
         pub headers: http::HeaderMap,
+    }
+
+    /// The spec's validation keywords of the parameters, at `path.<name>` and `query.<name>`, and of the body, at
+    /// `body`.
+    #[cfg(feature = "agents")]
+    impl crate::models::validation::Validate for ListAgentSessionArtifactsRequest {
+        fn validate_into(
+            &self,
+            path: &crate::models::validation::Path<'_>,
+            errors: &mut Vec<crate::models::validation::ValidationError>,
+        ) {
+            crate::models::validation::length(
+                &self.session_id,
+                Some(0),
+                Some(1048576),
+                &path.field("path").field("session_id"),
+                errors,
+            );
+            if let Some(value0) = &self.limit {
+                crate::models::validation::minimum(
+                    *value0,
+                    1,
+                    &path.field("query").field("limit"),
+                    errors,
+                );
+                crate::models::validation::maximum(
+                    *value0,
+                    100,
+                    &path.field("query").field("limit"),
+                    errors,
+                );
+            }
+            if let Some(value0) = &self.after {
+                crate::models::validation::length(
+                    value0,
+                    Some(0),
+                    Some(1048576),
+                    &path.field("query").field("after"),
+                    errors,
+                );
+            }
+            if let Some(value0) = &self.environment_id {
+                crate::models::validation::length(
+                    value0,
+                    Some(0),
+                    Some(1048576),
+                    &path.field("query").field("environment_id"),
+                    errors,
+                );
+            }
+        }
     }
 
     /// The responses of [`AgentsApi::list_agent_session_artifacts`], one per status the spec declares.
@@ -4989,6 +5707,9 @@ pub mod agents_api {
             Ok(request) => request,
             Err(error) => return api.invalid_request(error),
         };
+        if let Err(errors) = crate::models::validation::Validate::validate(&request) {
+            return api.invalid_request(super::RequestError::invalid(errors));
+        }
         match api.list_agent_session_artifacts(request).await {
             Ok(response) => axum::response::IntoResponse::into_response(response),
             Err(error) => api.server_error(error),
@@ -5026,6 +5747,25 @@ pub mod agents_api {
         pub include_obfuscation: Option<bool>,
         /// The request's headers, with its header and cookie parameters and credentials.
         pub headers: http::HeaderMap,
+    }
+
+    /// The spec's validation keywords of the parameters, at `path.<name>` and `query.<name>`, and of the body, at
+    /// `body`.
+    #[cfg(feature = "agents")]
+    impl crate::models::validation::Validate for ListAgentSessionEventsRequest {
+        fn validate_into(
+            &self,
+            path: &crate::models::validation::Path<'_>,
+            errors: &mut Vec<crate::models::validation::ValidationError>,
+        ) {
+            crate::models::validation::length(
+                &self.session_id,
+                Some(0),
+                Some(1048576),
+                &path.field("path").field("session_id"),
+                errors,
+            );
+        }
     }
 
     /// The responses of [`AgentsApi::list_agent_session_events`], one per status the spec declares.
@@ -5113,6 +5853,9 @@ pub mod agents_api {
             Ok(request) => request,
             Err(error) => return api.invalid_request(error),
         };
+        if let Err(errors) = crate::models::validation::Validate::validate(&request) {
+            return api.invalid_request(super::RequestError::invalid(errors));
+        }
         match api.list_agent_session_events(request).await {
             Ok(response) => axum::response::IntoResponse::into_response(response),
             Err(error) => api.server_error(error),
@@ -5148,6 +5891,48 @@ pub mod agents_api {
         pub after: Option<String>,
         /// The request's headers, with its header and cookie parameters and credentials.
         pub headers: http::HeaderMap,
+    }
+
+    /// The spec's validation keywords of the parameters, at `path.<name>` and `query.<name>`, and of the body, at
+    /// `body`.
+    #[cfg(feature = "agents")]
+    impl crate::models::validation::Validate for ListAgentSessionItemsRequest {
+        fn validate_into(
+            &self,
+            path: &crate::models::validation::Path<'_>,
+            errors: &mut Vec<crate::models::validation::ValidationError>,
+        ) {
+            crate::models::validation::length(
+                &self.session_id,
+                Some(0),
+                Some(1048576),
+                &path.field("path").field("session_id"),
+                errors,
+            );
+            if let Some(value0) = &self.limit {
+                crate::models::validation::minimum(
+                    *value0,
+                    1,
+                    &path.field("query").field("limit"),
+                    errors,
+                );
+                crate::models::validation::maximum(
+                    *value0,
+                    100,
+                    &path.field("query").field("limit"),
+                    errors,
+                );
+            }
+            if let Some(value0) = &self.after {
+                crate::models::validation::length(
+                    value0,
+                    Some(0),
+                    Some(1048576),
+                    &path.field("query").field("after"),
+                    errors,
+                );
+            }
+        }
     }
 
     /// The responses of [`AgentsApi::list_agent_session_items`], one per status the spec declares.
@@ -5232,6 +6017,9 @@ pub mod agents_api {
             Ok(request) => request,
             Err(error) => return api.invalid_request(error),
         };
+        if let Err(errors) = crate::models::validation::Validate::validate(&request) {
+            return api.invalid_request(super::RequestError::invalid(errors));
+        }
         match api.list_agent_session_items(request).await {
             Ok(response) => axum::response::IntoResponse::into_response(response),
             Err(error) => api.server_error(error),
@@ -5274,6 +6062,55 @@ pub mod agents_api {
         pub after: Option<String>,
         /// The request's headers, with its header and cookie parameters and credentials.
         pub headers: http::HeaderMap,
+    }
+
+    /// The spec's validation keywords of the parameters, at `path.<name>` and `query.<name>`, and of the body, at
+    /// `body`.
+    #[cfg(feature = "agents")]
+    impl crate::models::validation::Validate for ListAgentSessionSubagentItemsRequest {
+        fn validate_into(
+            &self,
+            path: &crate::models::validation::Path<'_>,
+            errors: &mut Vec<crate::models::validation::ValidationError>,
+        ) {
+            crate::models::validation::length(
+                &self.session_id,
+                Some(0),
+                Some(1048576),
+                &path.field("path").field("session_id"),
+                errors,
+            );
+            crate::models::validation::length(
+                &self.subagent_id,
+                Some(0),
+                Some(1048576),
+                &path.field("path").field("subagent_id"),
+                errors,
+            );
+            if let Some(value0) = &self.limit {
+                crate::models::validation::minimum(
+                    *value0,
+                    1,
+                    &path.field("query").field("limit"),
+                    errors,
+                );
+                crate::models::validation::maximum(
+                    *value0,
+                    100,
+                    &path.field("query").field("limit"),
+                    errors,
+                );
+            }
+            if let Some(value0) = &self.after {
+                crate::models::validation::length(
+                    value0,
+                    Some(0),
+                    Some(1048576),
+                    &path.field("query").field("after"),
+                    errors,
+                );
+            }
+        }
     }
 
     /// The responses of [`AgentsApi::list_agent_session_subagent_items`], one per status the spec declares.
@@ -5358,6 +6195,9 @@ pub mod agents_api {
             Ok(request) => request,
             Err(error) => return api.invalid_request(error),
         };
+        if let Err(errors) = crate::models::validation::Validate::validate(&request) {
+            return api.invalid_request(super::RequestError::invalid(errors));
+        }
         match api.list_agent_session_subagent_items(request).await {
             Ok(response) => axum::response::IntoResponse::into_response(response),
             Err(error) => api.server_error(error),
@@ -5403,6 +6243,62 @@ pub mod agents_api {
         pub after: Option<String>,
         /// The request's headers, with its header and cookie parameters and credentials.
         pub headers: http::HeaderMap,
+    }
+
+    /// The spec's validation keywords of the parameters, at `path.<name>` and `query.<name>`, and of the body, at
+    /// `body`.
+    #[cfg(feature = "agents")]
+    impl crate::models::validation::Validate for ListAgentSessionSubagentTurnItemsRequest {
+        fn validate_into(
+            &self,
+            path: &crate::models::validation::Path<'_>,
+            errors: &mut Vec<crate::models::validation::ValidationError>,
+        ) {
+            crate::models::validation::length(
+                &self.session_id,
+                Some(0),
+                Some(1048576),
+                &path.field("path").field("session_id"),
+                errors,
+            );
+            crate::models::validation::length(
+                &self.subagent_id,
+                Some(0),
+                Some(1048576),
+                &path.field("path").field("subagent_id"),
+                errors,
+            );
+            crate::models::validation::length(
+                &self.turn_id,
+                Some(0),
+                Some(1048576),
+                &path.field("path").field("turn_id"),
+                errors,
+            );
+            if let Some(value0) = &self.limit {
+                crate::models::validation::minimum(
+                    *value0,
+                    1,
+                    &path.field("query").field("limit"),
+                    errors,
+                );
+                crate::models::validation::maximum(
+                    *value0,
+                    100,
+                    &path.field("query").field("limit"),
+                    errors,
+                );
+            }
+            if let Some(value0) = &self.after {
+                crate::models::validation::length(
+                    value0,
+                    Some(0),
+                    Some(1048576),
+                    &path.field("query").field("after"),
+                    errors,
+                );
+            }
+        }
     }
 
     /// The responses of [`AgentsApi::list_agent_session_subagent_turn_items`], one per status the spec declares.
@@ -5487,6 +6383,9 @@ pub mod agents_api {
             Ok(request) => request,
             Err(error) => return api.invalid_request(error),
         };
+        if let Err(errors) = crate::models::validation::Validate::validate(&request) {
+            return api.invalid_request(super::RequestError::invalid(errors));
+        }
         match api.list_agent_session_subagent_turn_items(request).await {
             Ok(response) => axum::response::IntoResponse::into_response(response),
             Err(error) => api.server_error(error),
@@ -5531,6 +6430,55 @@ pub mod agents_api {
         pub after: Option<String>,
         /// The request's headers, with its header and cookie parameters and credentials.
         pub headers: http::HeaderMap,
+    }
+
+    /// The spec's validation keywords of the parameters, at `path.<name>` and `query.<name>`, and of the body, at
+    /// `body`.
+    #[cfg(feature = "agents")]
+    impl crate::models::validation::Validate for ListAgentSessionSubagentTurnsRequest {
+        fn validate_into(
+            &self,
+            path: &crate::models::validation::Path<'_>,
+            errors: &mut Vec<crate::models::validation::ValidationError>,
+        ) {
+            crate::models::validation::length(
+                &self.session_id,
+                Some(0),
+                Some(1048576),
+                &path.field("path").field("session_id"),
+                errors,
+            );
+            crate::models::validation::length(
+                &self.subagent_id,
+                Some(0),
+                Some(1048576),
+                &path.field("path").field("subagent_id"),
+                errors,
+            );
+            if let Some(value0) = &self.limit {
+                crate::models::validation::minimum(
+                    *value0,
+                    1,
+                    &path.field("query").field("limit"),
+                    errors,
+                );
+                crate::models::validation::maximum(
+                    *value0,
+                    100,
+                    &path.field("query").field("limit"),
+                    errors,
+                );
+            }
+            if let Some(value0) = &self.after {
+                crate::models::validation::length(
+                    value0,
+                    Some(0),
+                    Some(1048576),
+                    &path.field("query").field("after"),
+                    errors,
+                );
+            }
+        }
     }
 
     /// The responses of [`AgentsApi::list_agent_session_subagent_turns`], one per status the spec declares.
@@ -5615,6 +6563,9 @@ pub mod agents_api {
             Ok(request) => request,
             Err(error) => return api.invalid_request(error),
         };
+        if let Err(errors) = crate::models::validation::Validate::validate(&request) {
+            return api.invalid_request(super::RequestError::invalid(errors));
+        }
         match api.list_agent_session_subagent_turns(request).await {
             Ok(response) => axum::response::IntoResponse::into_response(response),
             Err(error) => api.server_error(error),
@@ -5656,6 +6607,48 @@ pub mod agents_api {
         pub after: Option<String>,
         /// The request's headers, with its header and cookie parameters and credentials.
         pub headers: http::HeaderMap,
+    }
+
+    /// The spec's validation keywords of the parameters, at `path.<name>` and `query.<name>`, and of the body, at
+    /// `body`.
+    #[cfg(feature = "agents")]
+    impl crate::models::validation::Validate for ListAgentSessionSubagentsRequest {
+        fn validate_into(
+            &self,
+            path: &crate::models::validation::Path<'_>,
+            errors: &mut Vec<crate::models::validation::ValidationError>,
+        ) {
+            crate::models::validation::length(
+                &self.session_id,
+                Some(0),
+                Some(1048576),
+                &path.field("path").field("session_id"),
+                errors,
+            );
+            if let Some(value0) = &self.limit {
+                crate::models::validation::minimum(
+                    *value0,
+                    1,
+                    &path.field("query").field("limit"),
+                    errors,
+                );
+                crate::models::validation::maximum(
+                    *value0,
+                    100,
+                    &path.field("query").field("limit"),
+                    errors,
+                );
+            }
+            if let Some(value0) = &self.after {
+                crate::models::validation::length(
+                    value0,
+                    Some(0),
+                    Some(1048576),
+                    &path.field("query").field("after"),
+                    errors,
+                );
+            }
+        }
     }
 
     /// The responses of [`AgentsApi::list_agent_session_subagents`], one per status the spec declares.
@@ -5740,6 +6733,9 @@ pub mod agents_api {
             Ok(request) => request,
             Err(error) => return api.invalid_request(error),
         };
+        if let Err(errors) = crate::models::validation::Validate::validate(&request) {
+            return api.invalid_request(super::RequestError::invalid(errors));
+        }
         match api.list_agent_session_subagents(request).await {
             Ok(response) => axum::response::IntoResponse::into_response(response),
             Err(error) => api.server_error(error),
@@ -5780,6 +6776,48 @@ pub mod agents_api {
         pub after: Option<String>,
         /// The request's headers, with its header and cookie parameters and credentials.
         pub headers: http::HeaderMap,
+    }
+
+    /// The spec's validation keywords of the parameters, at `path.<name>` and `query.<name>`, and of the body, at
+    /// `body`.
+    #[cfg(feature = "agents")]
+    impl crate::models::validation::Validate for ListAgentSessionTracesRequest {
+        fn validate_into(
+            &self,
+            path: &crate::models::validation::Path<'_>,
+            errors: &mut Vec<crate::models::validation::ValidationError>,
+        ) {
+            crate::models::validation::length(
+                &self.session_id,
+                Some(0),
+                Some(1048576),
+                &path.field("path").field("session_id"),
+                errors,
+            );
+            if let Some(value0) = &self.limit {
+                crate::models::validation::minimum(
+                    *value0,
+                    1,
+                    &path.field("query").field("limit"),
+                    errors,
+                );
+                crate::models::validation::maximum(
+                    *value0,
+                    100,
+                    &path.field("query").field("limit"),
+                    errors,
+                );
+            }
+            if let Some(value0) = &self.after {
+                crate::models::validation::length(
+                    value0,
+                    Some(0),
+                    Some(1048576),
+                    &path.field("query").field("after"),
+                    errors,
+                );
+            }
+        }
     }
 
     /// The responses of [`AgentsApi::list_agent_session_traces`], one per status the spec declares.
@@ -5864,6 +6902,9 @@ pub mod agents_api {
             Ok(request) => request,
             Err(error) => return api.invalid_request(error),
         };
+        if let Err(errors) = crate::models::validation::Validate::validate(&request) {
+            return api.invalid_request(super::RequestError::invalid(errors));
+        }
         match api.list_agent_session_traces(request).await {
             Ok(response) => axum::response::IntoResponse::into_response(response),
             Err(error) => api.server_error(error),
@@ -5906,6 +6947,55 @@ pub mod agents_api {
         pub after: Option<String>,
         /// The request's headers, with its header and cookie parameters and credentials.
         pub headers: http::HeaderMap,
+    }
+
+    /// The spec's validation keywords of the parameters, at `path.<name>` and `query.<name>`, and of the body, at
+    /// `body`.
+    #[cfg(feature = "agents")]
+    impl crate::models::validation::Validate for ListAgentSessionTurnItemsRequest {
+        fn validate_into(
+            &self,
+            path: &crate::models::validation::Path<'_>,
+            errors: &mut Vec<crate::models::validation::ValidationError>,
+        ) {
+            crate::models::validation::length(
+                &self.session_id,
+                Some(0),
+                Some(1048576),
+                &path.field("path").field("session_id"),
+                errors,
+            );
+            crate::models::validation::length(
+                &self.turn_id,
+                Some(0),
+                Some(1048576),
+                &path.field("path").field("turn_id"),
+                errors,
+            );
+            if let Some(value0) = &self.limit {
+                crate::models::validation::minimum(
+                    *value0,
+                    1,
+                    &path.field("query").field("limit"),
+                    errors,
+                );
+                crate::models::validation::maximum(
+                    *value0,
+                    100,
+                    &path.field("query").field("limit"),
+                    errors,
+                );
+            }
+            if let Some(value0) = &self.after {
+                crate::models::validation::length(
+                    value0,
+                    Some(0),
+                    Some(1048576),
+                    &path.field("query").field("after"),
+                    errors,
+                );
+            }
+        }
     }
 
     /// The responses of [`AgentsApi::list_agent_session_turn_items`], one per status the spec declares.
@@ -5990,6 +7080,9 @@ pub mod agents_api {
             Ok(request) => request,
             Err(error) => return api.invalid_request(error),
         };
+        if let Err(errors) = crate::models::validation::Validate::validate(&request) {
+            return api.invalid_request(super::RequestError::invalid(errors));
+        }
         match api.list_agent_session_turn_items(request).await {
             Ok(response) => axum::response::IntoResponse::into_response(response),
             Err(error) => api.server_error(error),
@@ -6031,6 +7124,48 @@ pub mod agents_api {
         pub after: Option<String>,
         /// The request's headers, with its header and cookie parameters and credentials.
         pub headers: http::HeaderMap,
+    }
+
+    /// The spec's validation keywords of the parameters, at `path.<name>` and `query.<name>`, and of the body, at
+    /// `body`.
+    #[cfg(feature = "agents")]
+    impl crate::models::validation::Validate for ListAgentSessionTurnsRequest {
+        fn validate_into(
+            &self,
+            path: &crate::models::validation::Path<'_>,
+            errors: &mut Vec<crate::models::validation::ValidationError>,
+        ) {
+            crate::models::validation::length(
+                &self.session_id,
+                Some(0),
+                Some(1048576),
+                &path.field("path").field("session_id"),
+                errors,
+            );
+            if let Some(value0) = &self.limit {
+                crate::models::validation::minimum(
+                    *value0,
+                    1,
+                    &path.field("query").field("limit"),
+                    errors,
+                );
+                crate::models::validation::maximum(
+                    *value0,
+                    100,
+                    &path.field("query").field("limit"),
+                    errors,
+                );
+            }
+            if let Some(value0) = &self.after {
+                crate::models::validation::length(
+                    value0,
+                    Some(0),
+                    Some(1048576),
+                    &path.field("query").field("after"),
+                    errors,
+                );
+            }
+        }
     }
 
     /// The responses of [`AgentsApi::list_agent_session_turns`], one per status the spec declares.
@@ -6115,6 +7250,9 @@ pub mod agents_api {
             Ok(request) => request,
             Err(error) => return api.invalid_request(error),
         };
+        if let Err(errors) = crate::models::validation::Validate::validate(&request) {
+            return api.invalid_request(super::RequestError::invalid(errors));
+        }
         match api.list_agent_session_turns(request).await {
             Ok(response) => axum::response::IntoResponse::into_response(response),
             Err(error) => api.server_error(error),
@@ -6157,6 +7295,50 @@ pub mod agents_api {
         pub metadata: Option<std::collections::HashMap<String, String>>,
         /// The request's headers, with its header and cookie parameters and credentials.
         pub headers: http::HeaderMap,
+    }
+
+    /// The spec's validation keywords of the parameters, at `path.<name>` and `query.<name>`, and of the body, at
+    /// `body`.
+    #[cfg(feature = "agents")]
+    impl crate::models::validation::Validate for ListAgentSessionsRequest {
+        fn validate_into(
+            &self,
+            path: &crate::models::validation::Path<'_>,
+            errors: &mut Vec<crate::models::validation::ValidationError>,
+        ) {
+            if let Some(value0) = &self.limit {
+                crate::models::validation::minimum(
+                    *value0,
+                    1,
+                    &path.field("query").field("limit"),
+                    errors,
+                );
+                crate::models::validation::maximum(
+                    *value0,
+                    100,
+                    &path.field("query").field("limit"),
+                    errors,
+                );
+            }
+            if let Some(value0) = &self.after {
+                crate::models::validation::length(
+                    value0,
+                    Some(0),
+                    Some(1048576),
+                    &path.field("query").field("after"),
+                    errors,
+                );
+            }
+            if let Some(value0) = &self.agent_id {
+                crate::models::validation::length(
+                    value0,
+                    Some(0),
+                    Some(1048576),
+                    &path.field("query").field("agent_id"),
+                    errors,
+                );
+            }
+        }
     }
 
     /// The responses of [`AgentsApi::list_agent_sessions`], one per status the spec declares.
@@ -6227,6 +7409,9 @@ pub mod agents_api {
             Ok(request) => request,
             Err(error) => return api.invalid_request(error),
         };
+        if let Err(errors) = crate::models::validation::Validate::validate(&request) {
+            return api.invalid_request(super::RequestError::invalid(errors));
+        }
         match api.list_agent_sessions(request).await {
             Ok(response) => axum::response::IntoResponse::into_response(response),
             Err(error) => api.server_error(error),
@@ -6265,6 +7450,41 @@ pub mod agents_api {
         pub after: Option<String>,
         /// The request's headers, with its header and cookie parameters and credentials.
         pub headers: http::HeaderMap,
+    }
+
+    /// The spec's validation keywords of the parameters, at `path.<name>` and `query.<name>`, and of the body, at
+    /// `body`.
+    #[cfg(feature = "agents")]
+    impl crate::models::validation::Validate for ListAgentsRequest {
+        fn validate_into(
+            &self,
+            path: &crate::models::validation::Path<'_>,
+            errors: &mut Vec<crate::models::validation::ValidationError>,
+        ) {
+            if let Some(value0) = &self.limit {
+                crate::models::validation::minimum(
+                    *value0,
+                    1,
+                    &path.field("query").field("limit"),
+                    errors,
+                );
+                crate::models::validation::maximum(
+                    *value0,
+                    100,
+                    &path.field("query").field("limit"),
+                    errors,
+                );
+            }
+            if let Some(value0) = &self.after {
+                crate::models::validation::length(
+                    value0,
+                    Some(0),
+                    Some(1048576),
+                    &path.field("query").field("after"),
+                    errors,
+                );
+            }
+        }
     }
 
     /// The responses of [`AgentsApi::list_agents`], one per status the spec declares.
@@ -6335,6 +7555,9 @@ pub mod agents_api {
             Ok(request) => request,
             Err(error) => return api.invalid_request(error),
         };
+        if let Err(errors) = crate::models::validation::Validate::validate(&request) {
+            return api.invalid_request(super::RequestError::invalid(errors));
+        }
         match api.list_agents(request).await {
             Ok(response) => axum::response::IntoResponse::into_response(response),
             Err(error) => api.server_error(error),
@@ -6367,6 +7590,25 @@ pub mod agents_api {
         pub automation_id: String,
         /// The request's headers, with its header and cookie parameters and credentials.
         pub headers: http::HeaderMap,
+    }
+
+    /// The spec's validation keywords of the parameters, at `path.<name>` and `query.<name>`, and of the body, at
+    /// `body`.
+    #[cfg(feature = "agents")]
+    impl crate::models::validation::Validate for PauseAgentAutomationRequest {
+        fn validate_into(
+            &self,
+            path: &crate::models::validation::Path<'_>,
+            errors: &mut Vec<crate::models::validation::ValidationError>,
+        ) {
+            crate::models::validation::length(
+                &self.automation_id,
+                Some(0),
+                Some(1048576),
+                &path.field("path").field("automation_id"),
+                errors,
+            );
+        }
     }
 
     /// The responses of [`AgentsApi::pause_agent_automation`], one per status the spec declares.
@@ -6449,6 +7691,9 @@ pub mod agents_api {
             Ok(request) => request,
             Err(error) => return api.invalid_request(error),
         };
+        if let Err(errors) = crate::models::validation::Validate::validate(&request) {
+            return api.invalid_request(super::RequestError::invalid(errors));
+        }
         match api.pause_agent_automation(request).await {
             Ok(response) => axum::response::IntoResponse::into_response(response),
             Err(error) => api.server_error(error),
@@ -6474,6 +7719,25 @@ pub mod agents_api {
         pub automation_id: String,
         /// The request's headers, with its header and cookie parameters and credentials.
         pub headers: http::HeaderMap,
+    }
+
+    /// The spec's validation keywords of the parameters, at `path.<name>` and `query.<name>`, and of the body, at
+    /// `body`.
+    #[cfg(feature = "agents")]
+    impl crate::models::validation::Validate for ResumeAgentAutomationRequest {
+        fn validate_into(
+            &self,
+            path: &crate::models::validation::Path<'_>,
+            errors: &mut Vec<crate::models::validation::ValidationError>,
+        ) {
+            crate::models::validation::length(
+                &self.automation_id,
+                Some(0),
+                Some(1048576),
+                &path.field("path").field("automation_id"),
+                errors,
+            );
+        }
     }
 
     /// The responses of [`AgentsApi::resume_agent_automation`], one per status the spec declares.
@@ -6556,6 +7820,9 @@ pub mod agents_api {
             Ok(request) => request,
             Err(error) => return api.invalid_request(error),
         };
+        if let Err(errors) = crate::models::validation::Validate::validate(&request) {
+            return api.invalid_request(super::RequestError::invalid(errors));
+        }
         match api.resume_agent_automation(request).await {
             Ok(response) => axum::response::IntoResponse::into_response(response),
             Err(error) => api.server_error(error),
@@ -6581,6 +7848,25 @@ pub mod agents_api {
         pub agent_id: String,
         /// The request's headers, with its header and cookie parameters and credentials.
         pub headers: http::HeaderMap,
+    }
+
+    /// The spec's validation keywords of the parameters, at `path.<name>` and `query.<name>`, and of the body, at
+    /// `body`.
+    #[cfg(feature = "agents")]
+    impl crate::models::validation::Validate for RetrieveAgentRequest {
+        fn validate_into(
+            &self,
+            path: &crate::models::validation::Path<'_>,
+            errors: &mut Vec<crate::models::validation::ValidationError>,
+        ) {
+            crate::models::validation::length(
+                &self.agent_id,
+                Some(0),
+                Some(1048576),
+                &path.field("path").field("agent_id"),
+                errors,
+            );
+        }
     }
 
     /// The responses of [`AgentsApi::retrieve_agent`], one per status the spec declares.
@@ -6663,6 +7949,9 @@ pub mod agents_api {
             Ok(request) => request,
             Err(error) => return api.invalid_request(error),
         };
+        if let Err(errors) = crate::models::validation::Validate::validate(&request) {
+            return api.invalid_request(super::RequestError::invalid(errors));
+        }
         match api.retrieve_agent(request).await {
             Ok(response) => axum::response::IntoResponse::into_response(response),
             Err(error) => api.server_error(error),
@@ -6688,6 +7977,25 @@ pub mod agents_api {
         pub environment_id: String,
         /// The request's headers, with its header and cookie parameters and credentials.
         pub headers: http::HeaderMap,
+    }
+
+    /// The spec's validation keywords of the parameters, at `path.<name>` and `query.<name>`, and of the body, at
+    /// `body`.
+    #[cfg(feature = "agents")]
+    impl crate::models::validation::Validate for RetrieveAgentEnvironmentRequest {
+        fn validate_into(
+            &self,
+            path: &crate::models::validation::Path<'_>,
+            errors: &mut Vec<crate::models::validation::ValidationError>,
+        ) {
+            crate::models::validation::length(
+                &self.environment_id,
+                Some(0),
+                Some(1048576),
+                &path.field("path").field("environment_id"),
+                errors,
+            );
+        }
     }
 
     /// The responses of [`AgentsApi::retrieve_agent_environment`], one per status the spec declares.
@@ -6770,6 +8078,9 @@ pub mod agents_api {
             Ok(request) => request,
             Err(error) => return api.invalid_request(error),
         };
+        if let Err(errors) = crate::models::validation::Validate::validate(&request) {
+            return api.invalid_request(super::RequestError::invalid(errors));
+        }
         match api.retrieve_agent_environment(request).await {
             Ok(response) => axum::response::IntoResponse::into_response(response),
             Err(error) => api.server_error(error),
@@ -6797,6 +8108,25 @@ pub mod agents_api {
         pub environment_template_id: String,
         /// The request's headers, with its header and cookie parameters and credentials.
         pub headers: http::HeaderMap,
+    }
+
+    /// The spec's validation keywords of the parameters, at `path.<name>` and `query.<name>`, and of the body, at
+    /// `body`.
+    #[cfg(feature = "agents")]
+    impl crate::models::validation::Validate for RetrieveAgentEnvironmentTemplateRequest {
+        fn validate_into(
+            &self,
+            path: &crate::models::validation::Path<'_>,
+            errors: &mut Vec<crate::models::validation::ValidationError>,
+        ) {
+            crate::models::validation::length(
+                &self.environment_template_id,
+                Some(0),
+                Some(1048576),
+                &path.field("path").field("environment_template_id"),
+                errors,
+            );
+        }
     }
 
     /// The responses of [`AgentsApi::retrieve_agent_environment_template`], one per status the spec declares.
@@ -6874,6 +8204,9 @@ pub mod agents_api {
             Ok(request) => request,
             Err(error) => return api.invalid_request(error),
         };
+        if let Err(errors) = crate::models::validation::Validate::validate(&request) {
+            return api.invalid_request(super::RequestError::invalid(errors));
+        }
         match api.retrieve_agent_environment_template(request).await {
             Ok(response) => axum::response::IntoResponse::into_response(response),
             Err(error) => api.server_error(error),
@@ -6904,6 +8237,25 @@ pub mod agents_api {
         pub session_id: String,
         /// The request's headers, with its header and cookie parameters and credentials.
         pub headers: http::HeaderMap,
+    }
+
+    /// The spec's validation keywords of the parameters, at `path.<name>` and `query.<name>`, and of the body, at
+    /// `body`.
+    #[cfg(feature = "agents")]
+    impl crate::models::validation::Validate for RetrieveAgentSessionRequest {
+        fn validate_into(
+            &self,
+            path: &crate::models::validation::Path<'_>,
+            errors: &mut Vec<crate::models::validation::ValidationError>,
+        ) {
+            crate::models::validation::length(
+                &self.session_id,
+                Some(0),
+                Some(1048576),
+                &path.field("path").field("session_id"),
+                errors,
+            );
+        }
     }
 
     /// The responses of [`AgentsApi::retrieve_agent_session`], one per status the spec declares.
@@ -6986,6 +8338,9 @@ pub mod agents_api {
             Ok(request) => request,
             Err(error) => return api.invalid_request(error),
         };
+        if let Err(errors) = crate::models::validation::Validate::validate(&request) {
+            return api.invalid_request(super::RequestError::invalid(errors));
+        }
         match api.retrieve_agent_session(request).await {
             Ok(response) => axum::response::IntoResponse::into_response(response),
             Err(error) => api.server_error(error),
@@ -7013,6 +8368,32 @@ pub mod agents_api {
         pub artifact_id: String,
         /// The request's headers, with its header and cookie parameters and credentials.
         pub headers: http::HeaderMap,
+    }
+
+    /// The spec's validation keywords of the parameters, at `path.<name>` and `query.<name>`, and of the body, at
+    /// `body`.
+    #[cfg(feature = "agents")]
+    impl crate::models::validation::Validate for RetrieveAgentSessionArtifactRequest {
+        fn validate_into(
+            &self,
+            path: &crate::models::validation::Path<'_>,
+            errors: &mut Vec<crate::models::validation::ValidationError>,
+        ) {
+            crate::models::validation::length(
+                &self.session_id,
+                Some(0),
+                Some(1048576),
+                &path.field("path").field("session_id"),
+                errors,
+            );
+            crate::models::validation::length(
+                &self.artifact_id,
+                Some(0),
+                Some(1048576),
+                &path.field("path").field("artifact_id"),
+                errors,
+            );
+        }
     }
 
     /// The responses of [`AgentsApi::retrieve_agent_session_artifact`], one per status the spec declares.
@@ -7095,6 +8476,9 @@ pub mod agents_api {
             Ok(request) => request,
             Err(error) => return api.invalid_request(error),
         };
+        if let Err(errors) = crate::models::validation::Validate::validate(&request) {
+            return api.invalid_request(super::RequestError::invalid(errors));
+        }
         match api.retrieve_agent_session_artifact(request).await {
             Ok(response) => axum::response::IntoResponse::into_response(response),
             Err(error) => api.server_error(error),
@@ -7123,6 +8507,32 @@ pub mod agents_api {
         pub artifact_id: String,
         /// The request's headers, with its header and cookie parameters and credentials.
         pub headers: http::HeaderMap,
+    }
+
+    /// The spec's validation keywords of the parameters, at `path.<name>` and `query.<name>`, and of the body, at
+    /// `body`.
+    #[cfg(feature = "agents")]
+    impl crate::models::validation::Validate for RetrieveAgentSessionArtifactContentRequest {
+        fn validate_into(
+            &self,
+            path: &crate::models::validation::Path<'_>,
+            errors: &mut Vec<crate::models::validation::ValidationError>,
+        ) {
+            crate::models::validation::length(
+                &self.session_id,
+                Some(0),
+                Some(1048576),
+                &path.field("path").field("session_id"),
+                errors,
+            );
+            crate::models::validation::length(
+                &self.artifact_id,
+                Some(0),
+                Some(1048576),
+                &path.field("path").field("artifact_id"),
+                errors,
+            );
+        }
     }
 
     /// The responses of [`AgentsApi::retrieve_agent_session_artifact_content`], one per status the spec declares.
@@ -7210,6 +8620,9 @@ pub mod agents_api {
             Ok(request) => request,
             Err(error) => return api.invalid_request(error),
         };
+        if let Err(errors) = crate::models::validation::Validate::validate(&request) {
+            return api.invalid_request(super::RequestError::invalid(errors));
+        }
         match api.retrieve_agent_session_artifact_content(request).await {
             Ok(response) => axum::response::IntoResponse::into_response(response),
             Err(error) => api.server_error(error),
@@ -7238,6 +8651,32 @@ pub mod agents_api {
         pub subagent_id: String,
         /// The request's headers, with its header and cookie parameters and credentials.
         pub headers: http::HeaderMap,
+    }
+
+    /// The spec's validation keywords of the parameters, at `path.<name>` and `query.<name>`, and of the body, at
+    /// `body`.
+    #[cfg(feature = "agents")]
+    impl crate::models::validation::Validate for RetrieveAgentSessionSubagentRequest {
+        fn validate_into(
+            &self,
+            path: &crate::models::validation::Path<'_>,
+            errors: &mut Vec<crate::models::validation::ValidationError>,
+        ) {
+            crate::models::validation::length(
+                &self.session_id,
+                Some(0),
+                Some(1048576),
+                &path.field("path").field("session_id"),
+                errors,
+            );
+            crate::models::validation::length(
+                &self.subagent_id,
+                Some(0),
+                Some(1048576),
+                &path.field("path").field("subagent_id"),
+                errors,
+            );
+        }
     }
 
     /// The responses of [`AgentsApi::retrieve_agent_session_subagent`], one per status the spec declares.
@@ -7320,6 +8759,9 @@ pub mod agents_api {
             Ok(request) => request,
             Err(error) => return api.invalid_request(error),
         };
+        if let Err(errors) = crate::models::validation::Validate::validate(&request) {
+            return api.invalid_request(super::RequestError::invalid(errors));
+        }
         match api.retrieve_agent_session_subagent(request).await {
             Ok(response) => axum::response::IntoResponse::into_response(response),
             Err(error) => api.server_error(error),
@@ -7350,6 +8792,39 @@ pub mod agents_api {
         pub turn_id: String,
         /// The request's headers, with its header and cookie parameters and credentials.
         pub headers: http::HeaderMap,
+    }
+
+    /// The spec's validation keywords of the parameters, at `path.<name>` and `query.<name>`, and of the body, at
+    /// `body`.
+    #[cfg(feature = "agents")]
+    impl crate::models::validation::Validate for RetrieveAgentSessionSubagentTurnRequest {
+        fn validate_into(
+            &self,
+            path: &crate::models::validation::Path<'_>,
+            errors: &mut Vec<crate::models::validation::ValidationError>,
+        ) {
+            crate::models::validation::length(
+                &self.session_id,
+                Some(0),
+                Some(1048576),
+                &path.field("path").field("session_id"),
+                errors,
+            );
+            crate::models::validation::length(
+                &self.subagent_id,
+                Some(0),
+                Some(1048576),
+                &path.field("path").field("subagent_id"),
+                errors,
+            );
+            crate::models::validation::length(
+                &self.turn_id,
+                Some(0),
+                Some(1048576),
+                &path.field("path").field("turn_id"),
+                errors,
+            );
+        }
     }
 
     /// The responses of [`AgentsApi::retrieve_agent_session_subagent_turn`], one per status the spec declares.
@@ -7432,6 +8907,9 @@ pub mod agents_api {
             Ok(request) => request,
             Err(error) => return api.invalid_request(error),
         };
+        if let Err(errors) = crate::models::validation::Validate::validate(&request) {
+            return api.invalid_request(super::RequestError::invalid(errors));
+        }
         match api.retrieve_agent_session_subagent_turn(request).await {
             Ok(response) => axum::response::IntoResponse::into_response(response),
             Err(error) => api.server_error(error),
@@ -7461,6 +8939,32 @@ pub mod agents_api {
         pub turn_id: String,
         /// The request's headers, with its header and cookie parameters and credentials.
         pub headers: http::HeaderMap,
+    }
+
+    /// The spec's validation keywords of the parameters, at `path.<name>` and `query.<name>`, and of the body, at
+    /// `body`.
+    #[cfg(feature = "agents")]
+    impl crate::models::validation::Validate for RetrieveAgentSessionTurnRequest {
+        fn validate_into(
+            &self,
+            path: &crate::models::validation::Path<'_>,
+            errors: &mut Vec<crate::models::validation::ValidationError>,
+        ) {
+            crate::models::validation::length(
+                &self.session_id,
+                Some(0),
+                Some(1048576),
+                &path.field("path").field("session_id"),
+                errors,
+            );
+            crate::models::validation::length(
+                &self.turn_id,
+                Some(0),
+                Some(1048576),
+                &path.field("path").field("turn_id"),
+                errors,
+            );
+        }
     }
 
     /// The responses of [`AgentsApi::retrieve_agent_session_turn`], one per status the spec declares.
@@ -7543,6 +9047,9 @@ pub mod agents_api {
             Ok(request) => request,
             Err(error) => return api.invalid_request(error),
         };
+        if let Err(errors) = crate::models::validation::Validate::validate(&request) {
+            return api.invalid_request(super::RequestError::invalid(errors));
+        }
         match api.retrieve_agent_session_turn(request).await {
             Ok(response) => axum::response::IntoResponse::into_response(response),
             Err(error) => api.server_error(error),
@@ -7571,6 +9078,30 @@ pub mod agents_api {
         pub body: Option<models::UpdateAgentParams>,
         /// The request's headers, with its header and cookie parameters and credentials.
         pub headers: http::HeaderMap,
+    }
+
+    /// The spec's validation keywords of the parameters, at `path.<name>` and `query.<name>`, and of the body, at
+    /// `body`.
+    #[cfg(feature = "agents")]
+    impl crate::models::validation::Validate for UpdateAgentRequest {
+        fn validate_into(
+            &self,
+            path: &crate::models::validation::Path<'_>,
+            errors: &mut Vec<crate::models::validation::ValidationError>,
+        ) {
+            crate::models::validation::length(
+                &self.agent_id,
+                Some(0),
+                Some(1048576),
+                &path.field("path").field("agent_id"),
+                errors,
+            );
+            crate::models::validation::Validate::validate_into(
+                &self.body,
+                &path.field("body"),
+                errors,
+            );
+        }
     }
 
     /// The responses of [`AgentsApi::update_agent`], one per status the spec declares.
@@ -7654,6 +9185,9 @@ pub mod agents_api {
             Ok(request) => request,
             Err(error) => return api.invalid_request(error),
         };
+        if let Err(errors) = crate::models::validation::Validate::validate(&request) {
+            return api.invalid_request(super::RequestError::invalid(errors));
+        }
         match api.update_agent(request).await {
             Ok(response) => axum::response::IntoResponse::into_response(response),
             Err(error) => api.server_error(error),
@@ -7683,6 +9217,30 @@ pub mod agents_api {
         pub body: models::UpdateAutomationParams,
         /// The request's headers, with its header and cookie parameters and credentials.
         pub headers: http::HeaderMap,
+    }
+
+    /// The spec's validation keywords of the parameters, at `path.<name>` and `query.<name>`, and of the body, at
+    /// `body`.
+    #[cfg(feature = "agents")]
+    impl crate::models::validation::Validate for UpdateAgentAutomationRequest {
+        fn validate_into(
+            &self,
+            path: &crate::models::validation::Path<'_>,
+            errors: &mut Vec<crate::models::validation::ValidationError>,
+        ) {
+            crate::models::validation::length(
+                &self.automation_id,
+                Some(0),
+                Some(1048576),
+                &path.field("path").field("automation_id"),
+                errors,
+            );
+            crate::models::validation::Validate::validate_into(
+                &self.body,
+                &path.field("body"),
+                errors,
+            );
+        }
     }
 
     /// The responses of [`AgentsApi::update_agent_automation`], one per status the spec declares.
@@ -7766,6 +9324,9 @@ pub mod agents_api {
             Ok(request) => request,
             Err(error) => return api.invalid_request(error),
         };
+        if let Err(errors) = crate::models::validation::Validate::validate(&request) {
+            return api.invalid_request(super::RequestError::invalid(errors));
+        }
         match api.update_agent_automation(request).await {
             Ok(response) => axum::response::IntoResponse::into_response(response),
             Err(error) => api.server_error(error),
@@ -7795,6 +9356,30 @@ pub mod agents_api {
         pub body: Option<models::UpdateEnvironmentTemplateParams>,
         /// The request's headers, with its header and cookie parameters and credentials.
         pub headers: http::HeaderMap,
+    }
+
+    /// The spec's validation keywords of the parameters, at `path.<name>` and `query.<name>`, and of the body, at
+    /// `body`.
+    #[cfg(feature = "agents")]
+    impl crate::models::validation::Validate for UpdateAgentEnvironmentTemplateRequest {
+        fn validate_into(
+            &self,
+            path: &crate::models::validation::Path<'_>,
+            errors: &mut Vec<crate::models::validation::ValidationError>,
+        ) {
+            crate::models::validation::length(
+                &self.environment_template_id,
+                Some(0),
+                Some(1048576),
+                &path.field("path").field("environment_template_id"),
+                errors,
+            );
+            crate::models::validation::Validate::validate_into(
+                &self.body,
+                &path.field("body"),
+                errors,
+            );
+        }
     }
 
     /// The responses of [`AgentsApi::update_agent_environment_template`], one per status the spec declares.
@@ -7878,6 +9463,9 @@ pub mod agents_api {
             Ok(request) => request,
             Err(error) => return api.invalid_request(error),
         };
+        if let Err(errors) = crate::models::validation::Validate::validate(&request) {
+            return api.invalid_request(super::RequestError::invalid(errors));
+        }
         match api.update_agent_environment_template(request).await {
             Ok(response) => axum::response::IntoResponse::into_response(response),
             Err(error) => api.server_error(error),
@@ -7912,6 +9500,30 @@ pub mod agents_api {
         pub body: Option<models::UpdateAgentSessionParams>,
         /// The request's headers, with its header and cookie parameters and credentials.
         pub headers: http::HeaderMap,
+    }
+
+    /// The spec's validation keywords of the parameters, at `path.<name>` and `query.<name>`, and of the body, at
+    /// `body`.
+    #[cfg(feature = "agents")]
+    impl crate::models::validation::Validate for UpdateAgentSessionRequest {
+        fn validate_into(
+            &self,
+            path: &crate::models::validation::Path<'_>,
+            errors: &mut Vec<crate::models::validation::ValidationError>,
+        ) {
+            crate::models::validation::length(
+                &self.session_id,
+                Some(0),
+                Some(1048576),
+                &path.field("path").field("session_id"),
+                errors,
+            );
+            crate::models::validation::Validate::validate_into(
+                &self.body,
+                &path.field("body"),
+                errors,
+            );
+        }
     }
 
     /// The responses of [`AgentsApi::update_agent_session`], one per status the spec declares.
@@ -7995,6 +9607,9 @@ pub mod agents_api {
             Ok(request) => request,
             Err(error) => return api.invalid_request(error),
         };
+        if let Err(errors) = crate::models::validation::Validate::validate(&request) {
+            return api.invalid_request(super::RequestError::invalid(errors));
+        }
         match api.update_agent_session(request).await {
             Ok(response) => axum::response::IntoResponse::into_response(response),
             Err(error) => api.server_error(error),
@@ -8474,6 +10089,23 @@ pub mod assistants_api {
         pub headers: http::HeaderMap,
     }
 
+    /// The spec's validation keywords of the parameters, at `path.<name>` and `query.<name>`, and of the body, at
+    /// `body`.
+    #[cfg(feature = "assistants")]
+    impl crate::models::validation::Validate for CreateAssistantRequest {
+        fn validate_into(
+            &self,
+            path: &crate::models::validation::Path<'_>,
+            errors: &mut Vec<crate::models::validation::ValidationError>,
+        ) {
+            crate::models::validation::Validate::validate_into(
+                &self.body,
+                &path.field("body"),
+                errors,
+            );
+        }
+    }
+
     /// The responses of [`AssistantsApi::create_assistant`], one per status the spec declares.
     #[cfg(feature = "assistants")]
     #[derive(Clone, Debug)]
@@ -8514,6 +10146,9 @@ pub mod assistants_api {
             Ok(request) => request,
             Err(error) => return api.invalid_request(error),
         };
+        if let Err(errors) = crate::models::validation::Validate::validate(&request) {
+            return api.invalid_request(super::RequestError::invalid(errors));
+        }
         match api.create_assistant(request).await {
             Ok(response) => axum::response::IntoResponse::into_response(response),
             Err(error) => api.server_error(error),
@@ -8541,6 +10176,23 @@ pub mod assistants_api {
         pub body: models::CreateMessageRequest,
         /// The request's headers, with its header and cookie parameters and credentials.
         pub headers: http::HeaderMap,
+    }
+
+    /// The spec's validation keywords of the parameters, at `path.<name>` and `query.<name>`, and of the body, at
+    /// `body`.
+    #[cfg(feature = "assistants")]
+    impl crate::models::validation::Validate for CreateMessageRequest {
+        fn validate_into(
+            &self,
+            path: &crate::models::validation::Path<'_>,
+            errors: &mut Vec<crate::models::validation::ValidationError>,
+        ) {
+            crate::models::validation::Validate::validate_into(
+                &self.body,
+                &path.field("body"),
+                errors,
+            );
+        }
     }
 
     /// The responses of [`AssistantsApi::create_message`], one per status the spec declares.
@@ -8597,6 +10249,9 @@ pub mod assistants_api {
             Ok(request) => request,
             Err(error) => return api.invalid_request(error),
         };
+        if let Err(errors) = crate::models::validation::Validate::validate(&request) {
+            return api.invalid_request(super::RequestError::invalid(errors));
+        }
         match api.create_message(request).await {
             Ok(response) => axum::response::IntoResponse::into_response(response),
             Err(error) => api.server_error(error),
@@ -8628,6 +10283,23 @@ pub mod assistants_api {
         pub body: models::CreateRunRequest,
         /// The request's headers, with its header and cookie parameters and credentials.
         pub headers: http::HeaderMap,
+    }
+
+    /// The spec's validation keywords of the parameters, at `path.<name>` and `query.<name>`, and of the body, at
+    /// `body`.
+    #[cfg(feature = "assistants")]
+    impl crate::models::validation::Validate for CreateRunRequest {
+        fn validate_into(
+            &self,
+            path: &crate::models::validation::Path<'_>,
+            errors: &mut Vec<crate::models::validation::ValidationError>,
+        ) {
+            crate::models::validation::Validate::validate_into(
+                &self.body,
+                &path.field("body"),
+                errors,
+            );
+        }
     }
 
     /// The responses of [`AssistantsApi::create_run`], one per status the spec declares.
@@ -8694,6 +10366,9 @@ pub mod assistants_api {
             Ok(request) => request,
             Err(error) => return api.invalid_request(error),
         };
+        if let Err(errors) = crate::models::validation::Validate::validate(&request) {
+            return api.invalid_request(super::RequestError::invalid(errors));
+        }
         match api.create_run(request).await {
             Ok(response) => axum::response::IntoResponse::into_response(response),
             Err(error) => api.server_error(error),
@@ -8728,6 +10403,23 @@ pub mod assistants_api {
         pub body: Option<models::CreateThreadRequest>,
         /// The request's headers, with its header and cookie parameters and credentials.
         pub headers: http::HeaderMap,
+    }
+
+    /// The spec's validation keywords of the parameters, at `path.<name>` and `query.<name>`, and of the body, at
+    /// `body`.
+    #[cfg(feature = "assistants")]
+    impl crate::models::validation::Validate for CreateThreadRequest {
+        fn validate_into(
+            &self,
+            path: &crate::models::validation::Path<'_>,
+            errors: &mut Vec<crate::models::validation::ValidationError>,
+        ) {
+            crate::models::validation::Validate::validate_into(
+                &self.body,
+                &path.field("body"),
+                errors,
+            );
+        }
     }
 
     /// The responses of [`AssistantsApi::create_thread`], one per status the spec declares.
@@ -8770,6 +10462,9 @@ pub mod assistants_api {
             Ok(request) => request,
             Err(error) => return api.invalid_request(error),
         };
+        if let Err(errors) = crate::models::validation::Validate::validate(&request) {
+            return api.invalid_request(super::RequestError::invalid(errors));
+        }
         match api.create_thread(request).await {
             Ok(response) => axum::response::IntoResponse::into_response(response),
             Err(error) => api.server_error(error),
@@ -8795,6 +10490,23 @@ pub mod assistants_api {
         pub body: models::CreateThreadAndRunRequest,
         /// The request's headers, with its header and cookie parameters and credentials.
         pub headers: http::HeaderMap,
+    }
+
+    /// The spec's validation keywords of the parameters, at `path.<name>` and `query.<name>`, and of the body, at
+    /// `body`.
+    #[cfg(feature = "assistants")]
+    impl crate::models::validation::Validate for CreateThreadAndRunRequest {
+        fn validate_into(
+            &self,
+            path: &crate::models::validation::Path<'_>,
+            errors: &mut Vec<crate::models::validation::ValidationError>,
+        ) {
+            crate::models::validation::Validate::validate_into(
+                &self.body,
+                &path.field("body"),
+                errors,
+            );
+        }
     }
 
     /// The responses of [`AssistantsApi::create_thread_and_run`], one per status the spec declares.
@@ -8845,6 +10557,9 @@ pub mod assistants_api {
             Ok(request) => request,
             Err(error) => return api.invalid_request(error),
         };
+        if let Err(errors) = crate::models::validation::Validate::validate(&request) {
+            return api.invalid_request(super::RequestError::invalid(errors));
+        }
         match api.create_thread_and_run(request).await {
             Ok(response) => axum::response::IntoResponse::into_response(response),
             Err(error) => api.server_error(error),
@@ -9916,6 +11631,23 @@ pub mod assistants_api {
         pub headers: http::HeaderMap,
     }
 
+    /// The spec's validation keywords of the parameters, at `path.<name>` and `query.<name>`, and of the body, at
+    /// `body`.
+    #[cfg(feature = "assistants")]
+    impl crate::models::validation::Validate for ModifyAssistantRequest {
+        fn validate_into(
+            &self,
+            path: &crate::models::validation::Path<'_>,
+            errors: &mut Vec<crate::models::validation::ValidationError>,
+        ) {
+            crate::models::validation::Validate::validate_into(
+                &self.body,
+                &path.field("body"),
+                errors,
+            );
+        }
+    }
+
     /// The responses of [`AssistantsApi::modify_assistant`], one per status the spec declares.
     #[cfg(feature = "assistants")]
     #[derive(Clone, Debug)]
@@ -9970,6 +11702,9 @@ pub mod assistants_api {
             Ok(request) => request,
             Err(error) => return api.invalid_request(error),
         };
+        if let Err(errors) = crate::models::validation::Validate::validate(&request) {
+            return api.invalid_request(super::RequestError::invalid(errors));
+        }
         match api.modify_assistant(request).await {
             Ok(response) => axum::response::IntoResponse::into_response(response),
             Err(error) => api.server_error(error),
@@ -10177,6 +11912,23 @@ pub mod assistants_api {
         pub headers: http::HeaderMap,
     }
 
+    /// The spec's validation keywords of the parameters, at `path.<name>` and `query.<name>`, and of the body, at
+    /// `body`.
+    #[cfg(feature = "assistants")]
+    impl crate::models::validation::Validate for ModifyThreadRequest {
+        fn validate_into(
+            &self,
+            path: &crate::models::validation::Path<'_>,
+            errors: &mut Vec<crate::models::validation::ValidationError>,
+        ) {
+            crate::models::validation::Validate::validate_into(
+                &self.body,
+                &path.field("body"),
+                errors,
+            );
+        }
+    }
+
     /// The responses of [`AssistantsApi::modify_thread`], one per status the spec declares.
     #[cfg(feature = "assistants")]
     #[derive(Clone, Debug)]
@@ -10231,6 +11983,9 @@ pub mod assistants_api {
             Ok(request) => request,
             Err(error) => return api.invalid_request(error),
         };
+        if let Err(errors) = crate::models::validation::Validate::validate(&request) {
+            return api.invalid_request(super::RequestError::invalid(errors));
+        }
         match api.modify_thread(request).await {
             Ok(response) => axum::response::IntoResponse::into_response(response),
             Err(error) => api.server_error(error),
@@ -10545,6 +12300,23 @@ pub mod audio_api {
         pub headers: http::HeaderMap,
     }
 
+    /// The spec's validation keywords of the parameters, at `path.<name>` and `query.<name>`, and of the body, at
+    /// `body`.
+    #[cfg(feature = "audio")]
+    impl crate::models::validation::Validate for CreateSpeechRequest {
+        fn validate_into(
+            &self,
+            path: &crate::models::validation::Path<'_>,
+            errors: &mut Vec<crate::models::validation::ValidationError>,
+        ) {
+            crate::models::validation::Validate::validate_into(
+                &self.body,
+                &path.field("body"),
+                errors,
+            );
+        }
+    }
+
     /// The responses of [`AudioApi::create_speech`], one per status the spec declares.
     #[cfg(feature = "audio")]
     #[derive(Debug)]
@@ -10635,6 +12407,9 @@ pub mod audio_api {
             Ok(request) => request,
             Err(error) => return api.invalid_request(error),
         };
+        if let Err(errors) = crate::models::validation::Validate::validate(&request) {
+            return api.invalid_request(super::RequestError::invalid(errors));
+        }
         match api.create_speech(request).await {
             Ok(response) => axum::response::IntoResponse::into_response(response),
             Err(error) => api.server_error(error),
@@ -10660,6 +12435,23 @@ pub mod audio_api {
         pub body: CreateTranscriptionForm,
         /// The request's headers, with its header and cookie parameters and credentials.
         pub headers: http::HeaderMap,
+    }
+
+    /// The spec's validation keywords of the parameters, at `path.<name>` and `query.<name>`, and of the body, at
+    /// `body`.
+    #[cfg(feature = "audio")]
+    impl crate::models::validation::Validate for CreateTranscriptionRequest {
+        fn validate_into(
+            &self,
+            path: &crate::models::validation::Path<'_>,
+            errors: &mut Vec<crate::models::validation::ValidationError>,
+        ) {
+            crate::models::validation::Validate::validate_into(
+                &self.body,
+                &path.field("body"),
+                errors,
+            );
+        }
     }
 
     /// The `multipart/form-data` body of [`AudioApi::create_transcription`]: a field per property, a
@@ -10695,6 +12487,43 @@ pub mod audio_api {
         pub known_speaker_names: Option<Vec<String>>,
         /// `known_speaker_references`: Optional list of audio samples (as [data URLs](https://developer.mozilla.org/en-US/docs/Web/HTTP/Basics_of_HTTP/Data_URLs)) that contain known speaker references matching `known_speaker_names[]`. Each sample must be between 2 and 10 seconds, and can use any of the same input audio formats supported by `file`.
         pub known_speaker_references: Option<Vec<String>>,
+    }
+
+    #[cfg(feature = "audio")]
+    impl crate::models::validation::Validate for CreateTranscriptionForm {
+        fn validate_into(
+            &self,
+            path: &crate::models::validation::Path<'_>,
+            errors: &mut Vec<crate::models::validation::ValidationError>,
+        ) {
+            if let Some(value0) = &self.languages {
+                crate::models::validation::items(
+                    value0.len(),
+                    Some(1),
+                    None,
+                    &path.field("languages"),
+                    errors,
+                );
+            }
+            if let Some(value0) = &self.known_speaker_names {
+                crate::models::validation::items(
+                    value0.len(),
+                    None,
+                    Some(4),
+                    &path.field("known_speaker_names"),
+                    errors,
+                );
+            }
+            if let Some(value0) = &self.known_speaker_references {
+                crate::models::validation::items(
+                    value0.len(),
+                    None,
+                    Some(4),
+                    &path.field("known_speaker_references"),
+                    errors,
+                );
+            }
+        }
     }
 
     #[cfg(feature = "audio")]
@@ -10863,6 +12692,9 @@ pub mod audio_api {
             Ok(request) => request,
             Err(error) => return api.invalid_request(error),
         };
+        if let Err(errors) = crate::models::validation::Validate::validate(&request) {
+            return api.invalid_request(super::RequestError::invalid(errors));
+        }
         match api.create_transcription(request).await {
             Ok(response) => axum::response::IntoResponse::into_response(response),
             Err(error) => api.server_error(error),
@@ -11052,6 +12884,23 @@ pub mod audio_api {
         pub headers: http::HeaderMap,
     }
 
+    /// The spec's validation keywords of the parameters, at `path.<name>` and `query.<name>`, and of the body, at
+    /// `body`.
+    #[cfg(feature = "audio")]
+    impl crate::models::validation::Validate for CreateVoiceRequest {
+        fn validate_into(
+            &self,
+            path: &crate::models::validation::Path<'_>,
+            errors: &mut Vec<crate::models::validation::ValidationError>,
+        ) {
+            crate::models::validation::Validate::validate_into(
+                &self.body,
+                &path.field("body"),
+                errors,
+            );
+        }
+    }
+
     /// The request body of [`AudioApi::create_voice`], one of the media types the spec gives it: a variant per kind,
     /// chosen by the request's `Content-Type`.
     #[cfg(feature = "audio")]
@@ -11061,6 +12910,24 @@ pub mod audio_api {
         Json(models::CreateVoicePromptRequest),
         /// `multipart/form-data`
         Multipart(CreateVoiceForm),
+    }
+
+    #[cfg(feature = "audio")]
+    impl crate::models::validation::Validate for CreateVoiceBody {
+        fn validate_into(
+            &self,
+            path: &crate::models::validation::Path<'_>,
+            errors: &mut Vec<crate::models::validation::ValidationError>,
+        ) {
+            match self {
+                CreateVoiceBody::Json(value) => {
+                    crate::models::validation::Validate::validate_into(value, path, errors);
+                }
+                CreateVoiceBody::Multipart(value) => {
+                    crate::models::validation::Validate::validate_into(value, path, errors);
+                }
+            }
+        }
     }
 
     #[cfg(feature = "audio")]
@@ -11107,6 +12974,43 @@ pub mod audio_api {
         pub script_hint: Option<String>,
         /// `model`: The voice creation model to use. Defaults to `auto`. Defaults to `\"auto\"`.
         pub model: Option<String>,
+    }
+
+    #[cfg(feature = "audio")]
+    impl crate::models::validation::Validate for CreateVoiceForm {
+        fn validate_into(
+            &self,
+            path: &crate::models::validation::Path<'_>,
+            errors: &mut Vec<crate::models::validation::ValidationError>,
+        ) {
+            if let Some(value0) = &self.name {
+                crate::models::validation::length(
+                    value0,
+                    Some(1),
+                    Some(256),
+                    &path.field("name"),
+                    errors,
+                );
+            }
+            if let Some(value0) = &self.prompt {
+                crate::models::validation::length(
+                    value0,
+                    Some(1),
+                    Some(2000),
+                    &path.field("prompt"),
+                    errors,
+                );
+            }
+            if let Some(value0) = &self.script_hint {
+                crate::models::validation::length(
+                    value0,
+                    Some(1),
+                    Some(2000),
+                    &path.field("script_hint"),
+                    errors,
+                );
+            }
+        }
     }
 
     #[cfg(feature = "audio")]
@@ -11175,6 +13079,9 @@ pub mod audio_api {
             Ok(request) => request,
             Err(error) => return api.invalid_request(error),
         };
+        if let Err(errors) = crate::models::validation::Validate::validate(&request) {
+            return api.invalid_request(super::RequestError::invalid(errors));
+        }
         match api.create_voice(request).await {
             Ok(response) => axum::response::IntoResponse::into_response(response),
             Err(error) => api.server_error(error),
@@ -12053,6 +13960,23 @@ pub mod batch_api {
         pub headers: http::HeaderMap,
     }
 
+    /// The spec's validation keywords of the parameters, at `path.<name>` and `query.<name>`, and of the body, at
+    /// `body`.
+    #[cfg(feature = "batch")]
+    impl crate::models::validation::Validate for CreateBatchRequest {
+        fn validate_into(
+            &self,
+            path: &crate::models::validation::Path<'_>,
+            errors: &mut Vec<crate::models::validation::ValidationError>,
+        ) {
+            crate::models::validation::Validate::validate_into(
+                &self.body,
+                &path.field("body"),
+                errors,
+            );
+        }
+    }
+
     /// The responses of [`BatchApi::create_batch`], one per status the spec declares.
     #[cfg(feature = "batch")]
     #[derive(Clone, Debug)]
@@ -12105,6 +14029,9 @@ pub mod batch_api {
             Ok(request) => request,
             Err(error) => return api.invalid_request(error),
         };
+        if let Err(errors) = crate::models::validation::Validate::validate(&request) {
+            return api.invalid_request(super::RequestError::invalid(errors));
+        }
         match api.create_batch(request).await {
             Ok(response) => axum::response::IntoResponse::into_response(response),
             Err(error) => api.server_error(error),
@@ -12494,6 +14421,23 @@ pub mod certificates_api {
         pub headers: http::HeaderMap,
     }
 
+    /// The spec's validation keywords of the parameters, at `path.<name>` and `query.<name>`, and of the body, at
+    /// `body`.
+    #[cfg(feature = "administration")]
+    impl crate::models::validation::Validate for ActivateOrganizationCertificatesRequest {
+        fn validate_into(
+            &self,
+            path: &crate::models::validation::Path<'_>,
+            errors: &mut Vec<crate::models::validation::ValidationError>,
+        ) {
+            crate::models::validation::Validate::validate_into(
+                &self.body,
+                &path.field("body"),
+                errors,
+            );
+        }
+    }
+
     /// The responses of [`CertificatesApi::activate_organization_certificates`], one per status the spec declares.
     #[cfg(feature = "administration")]
     #[derive(Clone, Debug)]
@@ -12554,6 +14498,9 @@ pub mod certificates_api {
             Ok(request) => request,
             Err(error) => return api.invalid_request(error),
         };
+        if let Err(errors) = crate::models::validation::Validate::validate(&request) {
+            return api.invalid_request(super::RequestError::invalid(errors));
+        }
         match api.activate_organization_certificates(request).await {
             Ok(response) => axum::response::IntoResponse::into_response(response),
             Err(error) => api.server_error(error),
@@ -12581,6 +14528,23 @@ pub mod certificates_api {
         pub body: models::ToggleCertificatesRequest,
         /// The request's headers, with its header and cookie parameters and credentials.
         pub headers: http::HeaderMap,
+    }
+
+    /// The spec's validation keywords of the parameters, at `path.<name>` and `query.<name>`, and of the body, at
+    /// `body`.
+    #[cfg(feature = "administration")]
+    impl crate::models::validation::Validate for ActivateProjectCertificatesRequest {
+        fn validate_into(
+            &self,
+            path: &crate::models::validation::Path<'_>,
+            errors: &mut Vec<crate::models::validation::ValidationError>,
+        ) {
+            crate::models::validation::Validate::validate_into(
+                &self.body,
+                &path.field("body"),
+                errors,
+            );
+        }
     }
 
     /// The responses of [`CertificatesApi::activate_project_certificates`], one per status the spec declares.
@@ -12657,6 +14621,9 @@ pub mod certificates_api {
             Ok(request) => request,
             Err(error) => return api.invalid_request(error),
         };
+        if let Err(errors) = crate::models::validation::Validate::validate(&request) {
+            return api.invalid_request(super::RequestError::invalid(errors));
+        }
         match api.activate_project_certificates(request).await {
             Ok(response) => axum::response::IntoResponse::into_response(response),
             Err(error) => api.server_error(error),
@@ -12684,6 +14651,23 @@ pub mod certificates_api {
         pub body: models::ToggleCertificatesRequest,
         /// The request's headers, with its header and cookie parameters and credentials.
         pub headers: http::HeaderMap,
+    }
+
+    /// The spec's validation keywords of the parameters, at `path.<name>` and `query.<name>`, and of the body, at
+    /// `body`.
+    #[cfg(feature = "administration")]
+    impl crate::models::validation::Validate for DeactivateOrganizationCertificatesRequest {
+        fn validate_into(
+            &self,
+            path: &crate::models::validation::Path<'_>,
+            errors: &mut Vec<crate::models::validation::ValidationError>,
+        ) {
+            crate::models::validation::Validate::validate_into(
+                &self.body,
+                &path.field("body"),
+                errors,
+            );
+        }
     }
 
     /// The responses of [`CertificatesApi::deactivate_organization_certificates`], one per status the spec declares.
@@ -12746,6 +14730,9 @@ pub mod certificates_api {
             Ok(request) => request,
             Err(error) => return api.invalid_request(error),
         };
+        if let Err(errors) = crate::models::validation::Validate::validate(&request) {
+            return api.invalid_request(super::RequestError::invalid(errors));
+        }
         match api.deactivate_organization_certificates(request).await {
             Ok(response) => axum::response::IntoResponse::into_response(response),
             Err(error) => api.server_error(error),
@@ -12773,6 +14760,23 @@ pub mod certificates_api {
         pub body: models::ToggleCertificatesRequest,
         /// The request's headers, with its header and cookie parameters and credentials.
         pub headers: http::HeaderMap,
+    }
+
+    /// The spec's validation keywords of the parameters, at `path.<name>` and `query.<name>`, and of the body, at
+    /// `body`.
+    #[cfg(feature = "administration")]
+    impl crate::models::validation::Validate for DeactivateProjectCertificatesRequest {
+        fn validate_into(
+            &self,
+            path: &crate::models::validation::Path<'_>,
+            errors: &mut Vec<crate::models::validation::ValidationError>,
+        ) {
+            crate::models::validation::Validate::validate_into(
+                &self.body,
+                &path.field("body"),
+                errors,
+            );
+        }
     }
 
     /// The responses of [`CertificatesApi::deactivate_project_certificates`], one per status the spec declares.
@@ -12849,6 +14853,9 @@ pub mod certificates_api {
             Ok(request) => request,
             Err(error) => return api.invalid_request(error),
         };
+        if let Err(errors) = crate::models::validation::Validate::validate(&request) {
+            return api.invalid_request(super::RequestError::invalid(errors));
+        }
         match api.deactivate_project_certificates(request).await {
             Ok(response) => axum::response::IntoResponse::into_response(response),
             Err(error) => api.server_error(error),
@@ -13577,6 +15584,23 @@ pub mod chat_api {
         pub headers: http::HeaderMap,
     }
 
+    /// The spec's validation keywords of the parameters, at `path.<name>` and `query.<name>`, and of the body, at
+    /// `body`.
+    #[cfg(feature = "chat-completion")]
+    impl crate::models::validation::Validate for CreateChatCompletionRequest {
+        fn validate_into(
+            &self,
+            path: &crate::models::validation::Path<'_>,
+            errors: &mut Vec<crate::models::validation::ValidationError>,
+        ) {
+            crate::models::validation::Validate::validate_into(
+                &self.body,
+                &path.field("body"),
+                errors,
+            );
+        }
+    }
+
     /// The responses of [`ChatApi::create_chat_completion`], one per status the spec declares.
     #[cfg(feature = "chat-completion")]
     #[derive(Debug)]
@@ -13671,6 +15695,9 @@ pub mod chat_api {
             Ok(request) => request,
             Err(error) => return api.invalid_request(error),
         };
+        if let Err(errors) = crate::models::validation::Validate::validate(&request) {
+            return api.invalid_request(super::RequestError::invalid(errors));
+        }
         match api.create_chat_completion(request).await {
             Ok(response) => axum::response::IntoResponse::into_response(response),
             Err(error) => api.server_error(error),
@@ -14215,6 +16242,23 @@ pub mod completions_api {
         pub headers: http::HeaderMap,
     }
 
+    /// The spec's validation keywords of the parameters, at `path.<name>` and `query.<name>`, and of the body, at
+    /// `body`.
+    #[cfg(feature = "completions")]
+    impl crate::models::validation::Validate for CreateCompletionRequest {
+        fn validate_into(
+            &self,
+            path: &crate::models::validation::Path<'_>,
+            errors: &mut Vec<crate::models::validation::ValidationError>,
+        ) {
+            crate::models::validation::Validate::validate_into(
+                &self.body,
+                &path.field("body"),
+                errors,
+            );
+        }
+    }
+
     /// The responses of [`CompletionsApi::create_completion`], one per status the spec declares.
     #[cfg(feature = "completions")]
     #[derive(Debug)]
@@ -14307,6 +16351,9 @@ pub mod completions_api {
             Ok(request) => request,
             Err(error) => return api.invalid_request(error),
         };
+        if let Err(errors) = crate::models::validation::Validate::validate(&request) {
+            return api.invalid_request(super::RequestError::invalid(errors));
+        }
         match api.create_completion(request).await {
             Ok(response) => axum::response::IntoResponse::into_response(response),
             Err(error) => api.server_error(error),
@@ -14494,6 +16541,23 @@ pub mod conversations_api {
         pub headers: http::HeaderMap,
     }
 
+    /// The spec's validation keywords of the parameters, at `path.<name>` and `query.<name>`, and of the body, at
+    /// `body`.
+    #[cfg(feature = "responses")]
+    impl crate::models::validation::Validate for CreateConversationRequest {
+        fn validate_into(
+            &self,
+            path: &crate::models::validation::Path<'_>,
+            errors: &mut Vec<crate::models::validation::ValidationError>,
+        ) {
+            crate::models::validation::Validate::validate_into(
+                &self.body,
+                &path.field("body"),
+                errors,
+            );
+        }
+    }
+
     /// The responses of [`ConversationsApi::create_conversation`], one per status the spec declares.
     #[cfg(feature = "responses")]
     #[derive(Clone, Debug)]
@@ -14544,6 +16608,9 @@ pub mod conversations_api {
             Ok(request) => request,
             Err(error) => return api.invalid_request(error),
         };
+        if let Err(errors) = crate::models::validation::Validate::validate(&request) {
+            return api.invalid_request(super::RequestError::invalid(errors));
+        }
         match api.create_conversation(request).await {
             Ok(response) => axum::response::IntoResponse::into_response(response),
             Err(error) => api.server_error(error),
@@ -14573,6 +16640,23 @@ pub mod conversations_api {
         pub body: models::CreateConversationItemsRequest,
         /// The request's headers, with its header and cookie parameters and credentials.
         pub headers: http::HeaderMap,
+    }
+
+    /// The spec's validation keywords of the parameters, at `path.<name>` and `query.<name>`, and of the body, at
+    /// `body`.
+    #[cfg(feature = "responses")]
+    impl crate::models::validation::Validate for CreateConversationItemsRequest {
+        fn validate_into(
+            &self,
+            path: &crate::models::validation::Path<'_>,
+            errors: &mut Vec<crate::models::validation::ValidationError>,
+        ) {
+            crate::models::validation::Validate::validate_into(
+                &self.body,
+                &path.field("body"),
+                errors,
+            );
+        }
     }
 
     /// The responses of [`ConversationsApi::create_conversation_items`], one per status the spec declares.
@@ -14646,6 +16730,9 @@ pub mod conversations_api {
             Ok(request) => request,
             Err(error) => return api.invalid_request(error),
         };
+        if let Err(errors) = crate::models::validation::Validate::validate(&request) {
+            return api.invalid_request(super::RequestError::invalid(errors));
+        }
         match api.create_conversation_items(request).await {
             Ok(response) => axum::response::IntoResponse::into_response(response),
             Err(error) => api.server_error(error),
@@ -15721,6 +17808,23 @@ pub mod decisions_api {
         pub headers: http::HeaderMap,
     }
 
+    /// The spec's validation keywords of the parameters, at `path.<name>` and `query.<name>`, and of the body, at
+    /// `body`.
+    #[cfg(feature = "decisions")]
+    impl crate::models::validation::Validate for CreateDecisionRequest {
+        fn validate_into(
+            &self,
+            path: &crate::models::validation::Path<'_>,
+            errors: &mut Vec<crate::models::validation::ValidationError>,
+        ) {
+            crate::models::validation::Validate::validate_into(
+                &self.body,
+                &path.field("body"),
+                errors,
+            );
+        }
+    }
+
     /// The responses of [`DecisionsApi::create_decision`], one per status the spec declares.
     #[cfg(feature = "decisions")]
     #[derive(Clone, Debug)]
@@ -15753,6 +17857,9 @@ pub mod decisions_api {
             Ok(request) => request,
             Err(error) => return api.invalid_request(error),
         };
+        if let Err(errors) = crate::models::validation::Validate::validate(&request) {
+            return api.invalid_request(super::RequestError::invalid(errors));
+        }
         match api.create_decision(request).await {
             Ok(response) => axum::response::IntoResponse::into_response(response),
             Err(error) => api.server_error(error),
@@ -16889,6 +18996,23 @@ pub mod default_api {
         pub headers: http::HeaderMap,
     }
 
+    /// The spec's validation keywords of the parameters, at `path.<name>` and `query.<name>`, and of the body, at
+    /// `body`.
+    #[cfg(feature = "administration")]
+    impl crate::models::validation::Validate for AddanexternalkeyconfigforanorganizationRequest {
+        fn validate_into(
+            &self,
+            path: &crate::models::validation::Path<'_>,
+            errors: &mut Vec<crate::models::validation::ValidationError>,
+        ) {
+            crate::models::validation::Validate::validate_into(
+                &self.body,
+                &path.field("body"),
+                errors,
+            );
+        }
+    }
+
     /// The responses of [`DefaultApi::addanexternalkeyconfigforanorganization`], one per status the spec declares.
     #[cfg(feature = "administration")]
     #[derive(Clone, Debug)]
@@ -16921,6 +19045,9 @@ pub mod default_api {
             Ok(request) => request,
             Err(error) => return api.invalid_request(error),
         };
+        if let Err(errors) = crate::models::validation::Validate::validate(&request) {
+            return api.invalid_request(super::RequestError::invalid(errors));
+        }
         match api.addanexternalkeyconfigforanorganization(request).await {
             Ok(response) => axum::response::IntoResponse::into_response(response),
             Err(error) => api.server_error(error),
@@ -16946,6 +19073,23 @@ pub mod default_api {
         pub body: models::AdminApiKeysCreateRequest,
         /// The request's headers, with its header and cookie parameters and credentials.
         pub headers: http::HeaderMap,
+    }
+
+    /// The spec's validation keywords of the parameters, at `path.<name>` and `query.<name>`, and of the body, at
+    /// `body`.
+    #[cfg(feature = "administration")]
+    impl crate::models::validation::Validate for AdminApiKeysCreateRequest {
+        fn validate_into(
+            &self,
+            path: &crate::models::validation::Path<'_>,
+            errors: &mut Vec<crate::models::validation::ValidationError>,
+        ) {
+            crate::models::validation::Validate::validate_into(
+                &self.body,
+                &path.field("body"),
+                errors,
+            );
+        }
     }
 
     /// The responses of [`DefaultApi::admin_api_keys_create`], one per status the spec declares.
@@ -16995,6 +19139,9 @@ pub mod default_api {
             Ok(request) => request,
             Err(error) => return api.invalid_request(error),
         };
+        if let Err(errors) = crate::models::validation::Validate::validate(&request) {
+            return api.invalid_request(super::RequestError::invalid(errors));
+        }
         match api.admin_api_keys_create(request).await {
             Ok(response) => axum::response::IntoResponse::into_response(response),
             Err(error) => api.server_error(error),
@@ -17349,6 +19496,23 @@ pub mod default_api {
         pub headers: http::HeaderMap,
     }
 
+    /// The spec's validation keywords of the parameters, at `path.<name>` and `query.<name>`, and of the body, at
+    /// `body`.
+    #[cfg(feature = "chatkit")]
+    impl crate::models::validation::Validate for CreateChatSessionMethodRequest {
+        fn validate_into(
+            &self,
+            path: &crate::models::validation::Path<'_>,
+            errors: &mut Vec<crate::models::validation::ValidationError>,
+        ) {
+            crate::models::validation::Validate::validate_into(
+                &self.body,
+                &path.field("body"),
+                errors,
+            );
+        }
+    }
+
     /// The responses of [`DefaultApi::create_chat_session_method`], one per status the spec declares.
     #[cfg(feature = "chatkit")]
     #[derive(Clone, Debug)]
@@ -17396,6 +19560,9 @@ pub mod default_api {
             Ok(request) => request,
             Err(error) => return api.invalid_request(error),
         };
+        if let Err(errors) = crate::models::validation::Validate::validate(&request) {
+            return api.invalid_request(super::RequestError::invalid(errors));
+        }
         match api.create_chat_session_method(request).await {
             Ok(response) => axum::response::IntoResponse::into_response(response),
             Err(error) => api.server_error(error),
@@ -17421,6 +19588,23 @@ pub mod default_api {
         pub body: Option<models::CreateContainerBody>,
         /// The request's headers, with its header and cookie parameters and credentials.
         pub headers: http::HeaderMap,
+    }
+
+    /// The spec's validation keywords of the parameters, at `path.<name>` and `query.<name>`, and of the body, at
+    /// `body`.
+    #[cfg(feature = "container")]
+    impl crate::models::validation::Validate for CreateContainerRequest {
+        fn validate_into(
+            &self,
+            path: &crate::models::validation::Path<'_>,
+            errors: &mut Vec<crate::models::validation::ValidationError>,
+        ) {
+            crate::models::validation::Validate::validate_into(
+                &self.body,
+                &path.field("body"),
+                errors,
+            );
+        }
     }
 
     /// The responses of [`DefaultApi::create_container`], one per status the spec declares.
@@ -17468,6 +19652,9 @@ pub mod default_api {
             Ok(request) => request,
             Err(error) => return api.invalid_request(error),
         };
+        if let Err(errors) = crate::models::validation::Validate::validate(&request) {
+            return api.invalid_request(super::RequestError::invalid(errors));
+        }
         match api.create_container(request).await {
             Ok(response) => axum::response::IntoResponse::into_response(response),
             Err(error) => api.server_error(error),
@@ -17655,6 +19842,30 @@ pub mod default_api {
         pub headers: http::HeaderMap,
     }
 
+    /// The spec's validation keywords of the parameters, at `path.<name>` and `query.<name>`, and of the body, at
+    /// `body`.
+    #[cfg(feature = "administration")]
+    impl crate::models::validation::Validate for CreatePlatformworkloadidentityfederationruleRequest {
+        fn validate_into(
+            &self,
+            path: &crate::models::validation::Path<'_>,
+            errors: &mut Vec<crate::models::validation::ValidationError>,
+        ) {
+            crate::models::validation::length(
+                &self.workload_identity_provider_id,
+                Some(1),
+                None,
+                &path.field("path").field("workload_identity_provider_id"),
+                errors,
+            );
+            crate::models::validation::Validate::validate_into(
+                &self.body,
+                &path.field("body"),
+                errors,
+            );
+        }
+    }
+
     /// The responses of [`DefaultApi::create_platformworkloadidentityfederationrule`], one per status the spec declares.
     #[cfg(feature = "administration")]
     #[derive(Clone, Debug)]
@@ -17702,6 +19913,9 @@ pub mod default_api {
                 Ok(request) => request,
                 Err(error) => return api.invalid_request(error),
             };
+        if let Err(errors) = crate::models::validation::Validate::validate(&request) {
+            return api.invalid_request(super::RequestError::invalid(errors));
+        }
         match api
             .create_platformworkloadidentityfederationrule(request)
             .await
@@ -17739,6 +19953,23 @@ pub mod default_api {
         pub headers: http::HeaderMap,
     }
 
+    /// The spec's validation keywords of the parameters, at `path.<name>` and `query.<name>`, and of the body, at
+    /// `body`.
+    #[cfg(feature = "administration")]
+    impl crate::models::validation::Validate for CreatePlatformworkloadidentityproviderRequest {
+        fn validate_into(
+            &self,
+            path: &crate::models::validation::Path<'_>,
+            errors: &mut Vec<crate::models::validation::ValidationError>,
+        ) {
+            crate::models::validation::Validate::validate_into(
+                &self.body,
+                &path.field("body"),
+                errors,
+            );
+        }
+    }
+
     /// The responses of [`DefaultApi::create_platformworkloadidentityprovider`], one per status the spec declares.
     #[cfg(feature = "administration")]
     #[derive(Clone, Debug)]
@@ -17771,6 +20002,9 @@ pub mod default_api {
             Ok(request) => request,
             Err(error) => return api.invalid_request(error),
         };
+        if let Err(errors) = crate::models::validation::Validate::validate(&request) {
+            return api.invalid_request(super::RequestError::invalid(errors));
+        }
         match api.create_platformworkloadidentityprovider(request).await {
             Ok(response) => axum::response::IntoResponse::into_response(response),
             Err(error) => api.server_error(error),
@@ -17796,6 +20030,23 @@ pub mod default_api {
         pub body: Option<models::PublicCreateEndpointBody>,
         /// The request's headers, with its header and cookie parameters and credentials.
         pub headers: http::HeaderMap,
+    }
+
+    /// The spec's validation keywords of the parameters, at `path.<name>` and `query.<name>`, and of the body, at
+    /// `body`.
+    #[cfg(feature = "webhook")]
+    impl crate::models::validation::Validate for CreateWebhookEndpointRequest {
+        fn validate_into(
+            &self,
+            path: &crate::models::validation::Path<'_>,
+            errors: &mut Vec<crate::models::validation::ValidationError>,
+        ) {
+            crate::models::validation::Validate::validate_into(
+                &self.body,
+                &path.field("body"),
+                errors,
+            );
+        }
     }
 
     /// The responses of [`DefaultApi::create_webhook_endpoint`], one per status the spec declares.
@@ -17835,6 +20086,9 @@ pub mod default_api {
             Ok(request) => request,
             Err(error) => return api.invalid_request(error),
         };
+        if let Err(errors) = crate::models::validation::Validate::validate(&request) {
+            return api.invalid_request(super::RequestError::invalid(errors));
+        }
         match api.create_webhook_endpoint(request).await {
             Ok(response) => axum::response::IntoResponse::into_response(response),
             Err(error) => api.server_error(error),
@@ -17864,6 +20118,23 @@ pub mod default_api {
         pub body: Option<models::CreateProjectServiceAccountApiKeyBody>,
         /// The request's headers, with its header and cookie parameters and credentials.
         pub headers: http::HeaderMap,
+    }
+
+    /// The spec's validation keywords of the parameters, at `path.<name>` and `query.<name>`, and of the body, at
+    /// `body`.
+    #[cfg(feature = "administration")]
+    impl crate::models::validation::Validate for CreateanApIkeyforaserviceaccountRequest {
+        fn validate_into(
+            &self,
+            path: &crate::models::validation::Path<'_>,
+            errors: &mut Vec<crate::models::validation::ValidationError>,
+        ) {
+            crate::models::validation::Validate::validate_into(
+                &self.body,
+                &path.field("body"),
+                errors,
+            );
+        }
     }
 
     /// The responses of [`DefaultApi::createan_ap_ikeyforaserviceaccount`], one per status the spec declares.
@@ -17932,6 +20203,9 @@ pub mod default_api {
             Ok(request) => request,
             Err(error) => return api.invalid_request(error),
         };
+        if let Err(errors) = crate::models::validation::Validate::validate(&request) {
+            return api.invalid_request(super::RequestError::invalid(errors));
+        }
         match api.createan_ap_ikeyforaserviceaccount(request).await {
             Ok(response) => axum::response::IntoResponse::into_response(response),
             Err(error) => api.server_error(error),
@@ -18330,6 +20604,34 @@ pub mod default_api {
         pub headers: http::HeaderMap,
     }
 
+    /// The spec's validation keywords of the parameters, at `path.<name>` and `query.<name>`, and of the body, at
+    /// `body`.
+    #[cfg(feature = "administration")]
+    impl crate::models::validation::Validate for DeletePlatformworkloadidentityfederationruleRequest {
+        fn validate_into(
+            &self,
+            path: &crate::models::validation::Path<'_>,
+            errors: &mut Vec<crate::models::validation::ValidationError>,
+        ) {
+            crate::models::validation::length(
+                &self.workload_identity_provider_id,
+                Some(1),
+                None,
+                &path.field("path").field("workload_identity_provider_id"),
+                errors,
+            );
+            crate::models::validation::length(
+                &self.workload_identity_federation_rule_id,
+                Some(1),
+                None,
+                &path
+                    .field("path")
+                    .field("workload_identity_federation_rule_id"),
+                errors,
+            );
+        }
+    }
+
     /// The responses of [`DefaultApi::delete_platformworkloadidentityfederationrule`], one per status the spec declares.
     #[cfg(feature = "administration")]
     #[derive(Clone, Debug)]
@@ -18375,6 +20677,9 @@ pub mod default_api {
             Ok(request) => request,
             Err(error) => return api.invalid_request(error),
         };
+        if let Err(errors) = crate::models::validation::Validate::validate(&request) {
+            return api.invalid_request(super::RequestError::invalid(errors));
+        }
         match api
             .delete_platformworkloadidentityfederationrule(request)
             .await
@@ -18414,6 +20719,25 @@ pub mod default_api {
         pub workload_identity_provider_id: String,
         /// The request's headers, with its header and cookie parameters and credentials.
         pub headers: http::HeaderMap,
+    }
+
+    /// The spec's validation keywords of the parameters, at `path.<name>` and `query.<name>`, and of the body, at
+    /// `body`.
+    #[cfg(feature = "administration")]
+    impl crate::models::validation::Validate for DeletePlatformworkloadidentityproviderRequest {
+        fn validate_into(
+            &self,
+            path: &crate::models::validation::Path<'_>,
+            errors: &mut Vec<crate::models::validation::ValidationError>,
+        ) {
+            crate::models::validation::length(
+                &self.workload_identity_provider_id,
+                Some(1),
+                None,
+                &path.field("path").field("workload_identity_provider_id"),
+                errors,
+            );
+        }
     }
 
     /// The responses of [`DefaultApi::delete_platformworkloadidentityprovider`], one per status the spec declares.
@@ -18461,6 +20785,9 @@ pub mod default_api {
             Ok(request) => request,
             Err(error) => return api.invalid_request(error),
         };
+        if let Err(errors) = crate::models::validation::Validate::validate(&request) {
+            return api.invalid_request(super::RequestError::invalid(errors));
+        }
         match api.delete_platformworkloadidentityprovider(request).await {
             Ok(response) => axum::response::IntoResponse::into_response(response),
             Err(error) => api.server_error(error),
@@ -19223,6 +21550,25 @@ pub mod default_api {
         pub headers: http::HeaderMap,
     }
 
+    /// The spec's validation keywords of the parameters, at `path.<name>` and `query.<name>`, and of the body, at
+    /// `body`.
+    #[cfg(feature = "safety")]
+    impl crate::models::validation::Validate for GetprojectsafetyalertRequest {
+        fn validate_into(
+            &self,
+            path: &crate::models::validation::Path<'_>,
+            errors: &mut Vec<crate::models::validation::ValidationError>,
+        ) {
+            crate::models::validation::length(
+                &self.id,
+                None,
+                Some(38),
+                &path.field("path").field("id"),
+                errors,
+            );
+        }
+    }
+
     /// The responses of [`DefaultApi::getprojectsafetyalert`], one per status the spec declares.
     #[cfg(feature = "safety")]
     #[derive(Clone, Debug)]
@@ -19291,6 +21637,9 @@ pub mod default_api {
             Ok(request) => request,
             Err(error) => return api.invalid_request(error),
         };
+        if let Err(errors) = crate::models::validation::Validate::validate(&request) {
+            return api.invalid_request(super::RequestError::invalid(errors));
+        }
         match api.getprojectsafetyalert(request).await {
             Ok(response) => axum::response::IntoResponse::into_response(response),
             Err(error) => api.server_error(error),
@@ -19405,6 +21754,25 @@ pub mod default_api {
         pub headers: http::HeaderMap,
     }
 
+    /// The spec's validation keywords of the parameters, at `path.<name>` and `query.<name>`, and of the body, at
+    /// `body`.
+    #[cfg(feature = "safety")]
+    impl crate::models::validation::Validate for GetsafetycaseRequest {
+        fn validate_into(
+            &self,
+            path: &crate::models::validation::Path<'_>,
+            errors: &mut Vec<crate::models::validation::ValidationError>,
+        ) {
+            crate::models::validation::length(
+                &self.id,
+                None,
+                Some(128),
+                &path.field("path").field("id"),
+                errors,
+            );
+        }
+    }
+
     /// The responses of [`DefaultApi::getsafetycase`], one per status the spec declares.
     #[cfg(feature = "safety")]
     #[derive(Clone, Debug)]
@@ -19478,6 +21846,9 @@ pub mod default_api {
             Ok(request) => request,
             Err(error) => return api.invalid_request(error),
         };
+        if let Err(errors) = crate::models::validation::Validate::validate(&request) {
+            return api.invalid_request(super::RequestError::invalid(errors));
+        }
         match api.getsafetycase(request).await {
             Ok(response) => axum::response::IntoResponse::into_response(response),
             Err(error) => api.server_error(error),
@@ -19692,6 +22063,57 @@ pub mod default_api {
         pub headers: http::HeaderMap,
     }
 
+    /// The spec's validation keywords of the parameters, at `path.<name>` and `query.<name>`, and of the body, at
+    /// `body`.
+    #[cfg(feature = "administration")]
+    impl crate::models::validation::Validate for ListPlatformworkloadidentityfederationrulesRequest {
+        fn validate_into(
+            &self,
+            path: &crate::models::validation::Path<'_>,
+            errors: &mut Vec<crate::models::validation::ValidationError>,
+        ) {
+            crate::models::validation::length(
+                &self.workload_identity_provider_id,
+                Some(1),
+                None,
+                &path.field("path").field("workload_identity_provider_id"),
+                errors,
+            );
+            if let Some(value0) = &self.limit {
+                crate::models::validation::minimum(
+                    *value0,
+                    1,
+                    &path.field("query").field("limit"),
+                    errors,
+                );
+                crate::models::validation::maximum(
+                    *value0,
+                    100,
+                    &path.field("query").field("limit"),
+                    errors,
+                );
+            }
+            if let Some(value0) = &self.after {
+                crate::models::validation::length(
+                    value0,
+                    Some(1),
+                    None,
+                    &path.field("query").field("after"),
+                    errors,
+                );
+            }
+            if let Some(value0) = &self.service_account_id {
+                crate::models::validation::length(
+                    value0,
+                    Some(1),
+                    None,
+                    &path.field("query").field("service_account_id"),
+                    errors,
+                );
+            }
+        }
+    }
+
     /// The responses of [`DefaultApi::list_platformworkloadidentityfederationrules`], one per status the spec declares.
     #[cfg(feature = "administration")]
     #[derive(Clone, Debug)]
@@ -19740,6 +22162,9 @@ pub mod default_api {
                 Ok(request) => request,
                 Err(error) => return api.invalid_request(error),
             };
+        if let Err(errors) = crate::models::validation::Validate::validate(&request) {
+            return api.invalid_request(super::RequestError::invalid(errors));
+        }
         match api
             .list_platformworkloadidentityfederationrules(request)
             .await
@@ -19797,6 +22222,41 @@ pub mod default_api {
         pub headers: http::HeaderMap,
     }
 
+    /// The spec's validation keywords of the parameters, at `path.<name>` and `query.<name>`, and of the body, at
+    /// `body`.
+    #[cfg(feature = "administration")]
+    impl crate::models::validation::Validate for ListPlatformworkloadidentityprovidersRequest {
+        fn validate_into(
+            &self,
+            path: &crate::models::validation::Path<'_>,
+            errors: &mut Vec<crate::models::validation::ValidationError>,
+        ) {
+            if let Some(value0) = &self.limit {
+                crate::models::validation::minimum(
+                    *value0,
+                    1,
+                    &path.field("query").field("limit"),
+                    errors,
+                );
+                crate::models::validation::maximum(
+                    *value0,
+                    100,
+                    &path.field("query").field("limit"),
+                    errors,
+                );
+            }
+            if let Some(value0) = &self.after {
+                crate::models::validation::length(
+                    value0,
+                    Some(1),
+                    None,
+                    &path.field("query").field("after"),
+                    errors,
+                );
+            }
+        }
+    }
+
     /// The responses of [`DefaultApi::list_platformworkloadidentityproviders`], one per status the spec declares.
     #[cfg(feature = "administration")]
     #[derive(Clone, Debug)]
@@ -19830,6 +22290,9 @@ pub mod default_api {
             Ok(request) => request,
             Err(error) => return api.invalid_request(error),
         };
+        if let Err(errors) = crate::models::validation::Validate::validate(&request) {
+            return api.invalid_request(super::RequestError::invalid(errors));
+        }
         match api.list_platformworkloadidentityproviders(request).await {
             Ok(response) => axum::response::IntoResponse::into_response(response),
             Err(error) => api.server_error(error),
@@ -19867,6 +22330,32 @@ pub mod default_api {
         pub before: Option<String>,
         /// The request's headers, with its header and cookie parameters and credentials.
         pub headers: http::HeaderMap,
+    }
+
+    /// The spec's validation keywords of the parameters, at `path.<name>` and `query.<name>`, and of the body, at
+    /// `body`.
+    #[cfg(feature = "chatkit")]
+    impl crate::models::validation::Validate for ListThreadItemsMethodRequest {
+        fn validate_into(
+            &self,
+            path: &crate::models::validation::Path<'_>,
+            errors: &mut Vec<crate::models::validation::ValidationError>,
+        ) {
+            if let Some(value0) = &self.limit {
+                crate::models::validation::minimum(
+                    *value0,
+                    0,
+                    &path.field("query").field("limit"),
+                    errors,
+                );
+                crate::models::validation::maximum(
+                    *value0,
+                    100,
+                    &path.field("query").field("limit"),
+                    errors,
+                );
+            }
+        }
     }
 
     /// The responses of [`DefaultApi::list_thread_items_method`], one per status the spec declares.
@@ -19931,6 +22420,9 @@ pub mod default_api {
             Ok(request) => request,
             Err(error) => return api.invalid_request(error),
         };
+        if let Err(errors) = crate::models::validation::Validate::validate(&request) {
+            return api.invalid_request(super::RequestError::invalid(errors));
+        }
         match api.list_thread_items_method(request).await {
             Ok(response) => axum::response::IntoResponse::into_response(response),
             Err(error) => api.server_error(error),
@@ -19972,6 +22464,41 @@ pub mod default_api {
         pub user: Option<String>,
         /// The request's headers, with its header and cookie parameters and credentials.
         pub headers: http::HeaderMap,
+    }
+
+    /// The spec's validation keywords of the parameters, at `path.<name>` and `query.<name>`, and of the body, at
+    /// `body`.
+    #[cfg(feature = "chatkit")]
+    impl crate::models::validation::Validate for ListThreadsMethodRequest {
+        fn validate_into(
+            &self,
+            path: &crate::models::validation::Path<'_>,
+            errors: &mut Vec<crate::models::validation::ValidationError>,
+        ) {
+            if let Some(value0) = &self.limit {
+                crate::models::validation::minimum(
+                    *value0,
+                    0,
+                    &path.field("query").field("limit"),
+                    errors,
+                );
+                crate::models::validation::maximum(
+                    *value0,
+                    100,
+                    &path.field("query").field("limit"),
+                    errors,
+                );
+            }
+            if let Some(value0) = &self.user {
+                crate::models::validation::length(
+                    value0,
+                    Some(1),
+                    Some(512),
+                    &path.field("query").field("user"),
+                    errors,
+                );
+            }
+        }
     }
 
     /// The responses of [`DefaultApi::list_threads_method`], one per status the spec declares.
@@ -20022,6 +22549,9 @@ pub mod default_api {
             Ok(request) => request,
             Err(error) => return api.invalid_request(error),
         };
+        if let Err(errors) = crate::models::validation::Validate::validate(&request) {
+            return api.invalid_request(super::RequestError::invalid(errors));
+        }
         match api.list_threads_method(request).await {
             Ok(response) => axum::response::IntoResponse::into_response(response),
             Err(error) => api.server_error(error),
@@ -20056,6 +22586,32 @@ pub mod default_api {
         pub after: Option<String>,
         /// The request's headers, with its header and cookie parameters and credentials.
         pub headers: http::HeaderMap,
+    }
+
+    /// The spec's validation keywords of the parameters, at `path.<name>` and `query.<name>`, and of the body, at
+    /// `body`.
+    #[cfg(feature = "webhook")]
+    impl crate::models::validation::Validate for ListWebhookEndpointsRequest {
+        fn validate_into(
+            &self,
+            path: &crate::models::validation::Path<'_>,
+            errors: &mut Vec<crate::models::validation::ValidationError>,
+        ) {
+            if let Some(value0) = &self.limit {
+                crate::models::validation::minimum(
+                    *value0,
+                    1,
+                    &path.field("query").field("limit"),
+                    errors,
+                );
+                crate::models::validation::maximum(
+                    *value0,
+                    100,
+                    &path.field("query").field("limit"),
+                    errors,
+                );
+            }
+        }
     }
 
     /// The responses of [`DefaultApi::list_webhook_endpoints`], one per status the spec declares.
@@ -20101,6 +22657,9 @@ pub mod default_api {
             Ok(request) => request,
             Err(error) => return api.invalid_request(error),
         };
+        if let Err(errors) = crate::models::validation::Validate::validate(&request) {
+            return api.invalid_request(super::RequestError::invalid(errors));
+        }
         match api.list_webhook_endpoints(request).await {
             Ok(response) => axum::response::IntoResponse::into_response(response),
             Err(error) => api.server_error(error),
@@ -20195,6 +22754,32 @@ pub mod default_api {
         pub headers: http::HeaderMap,
     }
 
+    /// The spec's validation keywords of the parameters, at `path.<name>` and `query.<name>`, and of the body, at
+    /// `body`.
+    #[cfg(feature = "administration")]
+    impl crate::models::validation::Validate for ListexternalstorageconfigurationsRequest {
+        fn validate_into(
+            &self,
+            path: &crate::models::validation::Path<'_>,
+            errors: &mut Vec<crate::models::validation::ValidationError>,
+        ) {
+            if let Some(value0) = &self.limit {
+                crate::models::validation::minimum(
+                    *value0,
+                    1,
+                    &path.field("query").field("limit"),
+                    errors,
+                );
+                crate::models::validation::maximum(
+                    *value0,
+                    100,
+                    &path.field("query").field("limit"),
+                    errors,
+                );
+            }
+        }
+    }
+
     /// The responses of [`DefaultApi::listexternalstorageconfigurations`], one per status the spec declares.
     #[cfg(feature = "administration")]
     #[derive(Clone, Debug)]
@@ -20243,6 +22828,9 @@ pub mod default_api {
             Ok(request) => request,
             Err(error) => return api.invalid_request(error),
         };
+        if let Err(errors) = crate::models::validation::Validate::validate(&request) {
+            return api.invalid_request(super::RequestError::invalid(errors));
+        }
         match api.listexternalstorageconfigurations(request).await {
             Ok(response) => axum::response::IntoResponse::into_response(response),
             Err(error) => api.server_error(error),
@@ -20284,6 +22872,34 @@ pub mod default_api {
         pub headers: http::HeaderMap,
     }
 
+    /// The spec's validation keywords of the parameters, at `path.<name>` and `query.<name>`, and of the body, at
+    /// `body`.
+    #[cfg(feature = "administration")]
+    impl crate::models::validation::Validate
+        for ListtheexternalkeyconfigsregisteredontheuserQuoteSorganizationRequest
+    {
+        fn validate_into(
+            &self,
+            path: &crate::models::validation::Path<'_>,
+            errors: &mut Vec<crate::models::validation::ValidationError>,
+        ) {
+            if let Some(value0) = &self.limit {
+                crate::models::validation::minimum(
+                    *value0,
+                    0,
+                    &path.field("query").field("limit"),
+                    errors,
+                );
+                crate::models::validation::maximum(
+                    *value0,
+                    100,
+                    &path.field("query").field("limit"),
+                    errors,
+                );
+            }
+        }
+    }
+
     /// The responses of [`DefaultApi::listtheexternalkeyconfigsregisteredontheuser_quote_sorganization`], one per status the spec declares.
     #[cfg(feature = "administration")]
     #[derive(Clone, Debug)]
@@ -20319,6 +22935,9 @@ pub mod default_api {
             Ok(request) => request,
             Err(error) => return api.invalid_request(error),
         };
+        if let Err(errors) = crate::models::validation::Validate::validate(&request) {
+            return api.invalid_request(super::RequestError::invalid(errors));
+        }
         match api
             .listtheexternalkeyconfigsregisteredontheuser_quote_sorganization(request)
             .await
@@ -20755,6 +23374,34 @@ pub mod default_api {
         pub headers: http::HeaderMap,
     }
 
+    /// The spec's validation keywords of the parameters, at `path.<name>` and `query.<name>`, and of the body, at
+    /// `body`.
+    #[cfg(feature = "administration")]
+    impl crate::models::validation::Validate for RetrievePlatformworkloadidentityfederationruleRequest {
+        fn validate_into(
+            &self,
+            path: &crate::models::validation::Path<'_>,
+            errors: &mut Vec<crate::models::validation::ValidationError>,
+        ) {
+            crate::models::validation::length(
+                &self.workload_identity_provider_id,
+                Some(1),
+                None,
+                &path.field("path").field("workload_identity_provider_id"),
+                errors,
+            );
+            crate::models::validation::length(
+                &self.workload_identity_federation_rule_id,
+                Some(1),
+                None,
+                &path
+                    .field("path")
+                    .field("workload_identity_federation_rule_id"),
+                errors,
+            );
+        }
+    }
+
     /// The responses of [`DefaultApi::retrieve_platformworkloadidentityfederationrule`], one per status the spec declares.
     #[cfg(feature = "administration")]
     #[derive(Clone, Debug)]
@@ -20800,6 +23447,9 @@ pub mod default_api {
             Ok(request) => request,
             Err(error) => return api.invalid_request(error),
         };
+        if let Err(errors) = crate::models::validation::Validate::validate(&request) {
+            return api.invalid_request(super::RequestError::invalid(errors));
+        }
         match api
             .retrieve_platformworkloadidentityfederationrule(request)
             .await
@@ -20839,6 +23489,25 @@ pub mod default_api {
         pub workload_identity_provider_id: String,
         /// The request's headers, with its header and cookie parameters and credentials.
         pub headers: http::HeaderMap,
+    }
+
+    /// The spec's validation keywords of the parameters, at `path.<name>` and `query.<name>`, and of the body, at
+    /// `body`.
+    #[cfg(feature = "administration")]
+    impl crate::models::validation::Validate for RetrievePlatformworkloadidentityproviderRequest {
+        fn validate_into(
+            &self,
+            path: &crate::models::validation::Path<'_>,
+            errors: &mut Vec<crate::models::validation::ValidationError>,
+        ) {
+            crate::models::validation::length(
+                &self.workload_identity_provider_id,
+                Some(1),
+                None,
+                &path.field("path").field("workload_identity_provider_id"),
+                errors,
+            );
+        }
     }
 
     /// The responses of [`DefaultApi::retrieve_platformworkloadidentityprovider`], one per status the spec declares.
@@ -20886,6 +23555,9 @@ pub mod default_api {
             Ok(request) => request,
             Err(error) => return api.invalid_request(error),
         };
+        if let Err(errors) = crate::models::validation::Validate::validate(&request) {
+            return api.invalid_request(super::RequestError::invalid(errors));
+        }
         match api.retrieve_platformworkloadidentityprovider(request).await {
             Ok(response) => axum::response::IntoResponse::into_response(response),
             Err(error) => api.server_error(error),
@@ -21335,6 +24007,39 @@ pub mod default_api {
         pub headers: http::HeaderMap,
     }
 
+    /// The spec's validation keywords of the parameters, at `path.<name>` and `query.<name>`, and of the body, at
+    /// `body`.
+    #[cfg(feature = "administration")]
+    impl crate::models::validation::Validate for UpdatePlatformworkloadidentityfederationruleRequest {
+        fn validate_into(
+            &self,
+            path: &crate::models::validation::Path<'_>,
+            errors: &mut Vec<crate::models::validation::ValidationError>,
+        ) {
+            crate::models::validation::length(
+                &self.workload_identity_provider_id,
+                Some(1),
+                None,
+                &path.field("path").field("workload_identity_provider_id"),
+                errors,
+            );
+            crate::models::validation::length(
+                &self.workload_identity_federation_rule_id,
+                Some(1),
+                None,
+                &path
+                    .field("path")
+                    .field("workload_identity_federation_rule_id"),
+                errors,
+            );
+            crate::models::validation::Validate::validate_into(
+                &self.body,
+                &path.field("body"),
+                errors,
+            );
+        }
+    }
+
     /// The responses of [`DefaultApi::update_platformworkloadidentityfederationrule`], one per status the spec declares.
     #[cfg(feature = "administration")]
     #[derive(Clone, Debug)]
@@ -21382,6 +24087,9 @@ pub mod default_api {
                 Ok(request) => request,
                 Err(error) => return api.invalid_request(error),
             };
+        if let Err(errors) = crate::models::validation::Validate::validate(&request) {
+            return api.invalid_request(super::RequestError::invalid(errors));
+        }
         match api
             .update_platformworkloadidentityfederationrule(request)
             .await
@@ -21425,6 +24133,30 @@ pub mod default_api {
         pub body: Option<models::UpdatePlatformWorkloadIdentityProviderBody>,
         /// The request's headers, with its header and cookie parameters and credentials.
         pub headers: http::HeaderMap,
+    }
+
+    /// The spec's validation keywords of the parameters, at `path.<name>` and `query.<name>`, and of the body, at
+    /// `body`.
+    #[cfg(feature = "administration")]
+    impl crate::models::validation::Validate for UpdatePlatformworkloadidentityproviderRequest {
+        fn validate_into(
+            &self,
+            path: &crate::models::validation::Path<'_>,
+            errors: &mut Vec<crate::models::validation::ValidationError>,
+        ) {
+            crate::models::validation::length(
+                &self.workload_identity_provider_id,
+                Some(1),
+                None,
+                &path.field("path").field("workload_identity_provider_id"),
+                errors,
+            );
+            crate::models::validation::Validate::validate_into(
+                &self.body,
+                &path.field("body"),
+                errors,
+            );
+        }
     }
 
     /// The responses of [`DefaultApi::update_platformworkloadidentityprovider`], one per status the spec declares.
@@ -21473,6 +24205,9 @@ pub mod default_api {
             Ok(request) => request,
             Err(error) => return api.invalid_request(error),
         };
+        if let Err(errors) = crate::models::validation::Validate::validate(&request) {
+            return api.invalid_request(super::RequestError::invalid(errors));
+        }
         match api.update_platformworkloadidentityprovider(request).await {
             Ok(response) => axum::response::IntoResponse::into_response(response),
             Err(error) => api.server_error(error),
@@ -21507,6 +24242,23 @@ pub mod default_api {
         pub body: Option<models::PublicUpdateEndpointBody>,
         /// The request's headers, with its header and cookie parameters and credentials.
         pub headers: http::HeaderMap,
+    }
+
+    /// The spec's validation keywords of the parameters, at `path.<name>` and `query.<name>`, and of the body, at
+    /// `body`.
+    #[cfg(feature = "webhook")]
+    impl crate::models::validation::Validate for UpdateWebhookEndpointRequest {
+        fn validate_into(
+            &self,
+            path: &crate::models::validation::Path<'_>,
+            errors: &mut Vec<crate::models::validation::ValidationError>,
+        ) {
+            crate::models::validation::Validate::validate_into(
+                &self.body,
+                &path.field("body"),
+                errors,
+            );
+        }
     }
 
     /// The responses of [`DefaultApi::update_webhook_endpoint`], one per status the spec declares.
@@ -21565,6 +24317,9 @@ pub mod default_api {
             Ok(request) => request,
             Err(error) => return api.invalid_request(error),
         };
+        if let Err(errors) = crate::models::validation::Validate::validate(&request) {
+            return api.invalid_request(super::RequestError::invalid(errors));
+        }
         match api.update_webhook_endpoint(request).await {
             Ok(response) => axum::response::IntoResponse::into_response(response),
             Err(error) => api.server_error(error),
@@ -21594,6 +24349,23 @@ pub mod default_api {
         pub body: models::UpdateOrganizationSpendLimitBody,
         /// The request's headers, with its header and cookie parameters and credentials.
         pub headers: http::HeaderMap,
+    }
+
+    /// The spec's validation keywords of the parameters, at `path.<name>` and `query.<name>`, and of the body, at
+    /// `body`.
+    #[cfg(feature = "administration")]
+    impl crate::models::validation::Validate for UpdateorganizationspendlimitRequest {
+        fn validate_into(
+            &self,
+            path: &crate::models::validation::Path<'_>,
+            errors: &mut Vec<crate::models::validation::ValidationError>,
+        ) {
+            crate::models::validation::Validate::validate_into(
+                &self.body,
+                &path.field("body"),
+                errors,
+            );
+        }
     }
 
     /// The responses of [`DefaultApi::updateorganizationspendlimit`], one per status the spec declares.
@@ -21638,6 +24410,9 @@ pub mod default_api {
             Ok(request) => request,
             Err(error) => return api.invalid_request(error),
         };
+        if let Err(errors) = crate::models::validation::Validate::validate(&request) {
+            return api.invalid_request(super::RequestError::invalid(errors));
+        }
         match api.updateorganizationspendlimit(request).await {
             Ok(response) => axum::response::IntoResponse::into_response(response),
             Err(error) => api.server_error(error),
@@ -21744,6 +24519,23 @@ pub mod default_api {
         pub headers: http::HeaderMap,
     }
 
+    /// The spec's validation keywords of the parameters, at `path.<name>` and `query.<name>`, and of the body, at
+    /// `body`.
+    #[cfg(feature = "administration")]
+    impl crate::models::validation::Validate for UpdateprojectspendlimitRequest {
+        fn validate_into(
+            &self,
+            path: &crate::models::validation::Path<'_>,
+            errors: &mut Vec<crate::models::validation::ValidationError>,
+        ) {
+            crate::models::validation::Validate::validate_into(
+                &self.body,
+                &path.field("body"),
+                errors,
+            );
+        }
+    }
+
     /// The responses of [`DefaultApi::updateprojectspendlimit`], one per status the spec declares.
     #[cfg(feature = "administration")]
     #[derive(Clone, Debug)]
@@ -21805,6 +24597,9 @@ pub mod default_api {
             Ok(request) => request,
             Err(error) => return api.invalid_request(error),
         };
+        if let Err(errors) = crate::models::validation::Validate::validate(&request) {
+            return api.invalid_request(super::RequestError::invalid(errors));
+        }
         match api.updateprojectspendlimit(request).await {
             Ok(response) => axum::response::IntoResponse::into_response(response),
             Err(error) => api.server_error(error),
@@ -22050,6 +24845,23 @@ pub mod embeddings_api {
         pub headers: http::HeaderMap,
     }
 
+    /// The spec's validation keywords of the parameters, at `path.<name>` and `query.<name>`, and of the body, at
+    /// `body`.
+    #[cfg(feature = "embedding")]
+    impl crate::models::validation::Validate for CreateEmbeddingRequest {
+        fn validate_into(
+            &self,
+            path: &crate::models::validation::Path<'_>,
+            errors: &mut Vec<crate::models::validation::ValidationError>,
+        ) {
+            crate::models::validation::Validate::validate_into(
+                &self.body,
+                &path.field("body"),
+                errors,
+            );
+        }
+    }
+
     /// The responses of [`EmbeddingsApi::create_embedding`], one per status the spec declares.
     #[cfg(feature = "embedding")]
     #[derive(Clone, Debug)]
@@ -22129,6 +24941,9 @@ pub mod embeddings_api {
             Ok(request) => request,
             Err(error) => return api.invalid_request(error),
         };
+        if let Err(errors) = crate::models::validation::Validate::validate(&request) {
+            return api.invalid_request(super::RequestError::invalid(errors));
+        }
         match api.create_embedding(request).await {
             Ok(response) => axum::response::IntoResponse::into_response(response),
             Err(error) => api.server_error(error),
@@ -22436,6 +25251,23 @@ pub mod evals_api {
         pub headers: http::HeaderMap,
     }
 
+    /// The spec's validation keywords of the parameters, at `path.<name>` and `query.<name>`, and of the body, at
+    /// `body`.
+    #[cfg(feature = "evals")]
+    impl crate::models::validation::Validate for CreateEvalRequest {
+        fn validate_into(
+            &self,
+            path: &crate::models::validation::Path<'_>,
+            errors: &mut Vec<crate::models::validation::ValidationError>,
+        ) {
+            crate::models::validation::Validate::validate_into(
+                &self.body,
+                &path.field("body"),
+                errors,
+            );
+        }
+    }
+
     /// The responses of [`EvalsApi::create_eval`], one per status the spec declares.
     #[cfg(feature = "evals")]
     #[derive(Clone, Debug)]
@@ -22481,6 +25313,9 @@ pub mod evals_api {
             Ok(request) => request,
             Err(error) => return api.invalid_request(error),
         };
+        if let Err(errors) = crate::models::validation::Validate::validate(&request) {
+            return api.invalid_request(super::RequestError::invalid(errors));
+        }
         match api.create_eval(request).await {
             Ok(response) => axum::response::IntoResponse::into_response(response),
             Err(error) => api.server_error(error),
@@ -22508,6 +25343,23 @@ pub mod evals_api {
         pub body: models::CreateEvalRunRequest,
         /// The request's headers, with its header and cookie parameters and credentials.
         pub headers: http::HeaderMap,
+    }
+
+    /// The spec's validation keywords of the parameters, at `path.<name>` and `query.<name>`, and of the body, at
+    /// `body`.
+    #[cfg(feature = "evals")]
+    impl crate::models::validation::Validate for CreateEvalRunRequest {
+        fn validate_into(
+            &self,
+            path: &crate::models::validation::Path<'_>,
+            errors: &mut Vec<crate::models::validation::ValidationError>,
+        ) {
+            crate::models::validation::Validate::validate_into(
+                &self.body,
+                &path.field("body"),
+                errors,
+            );
+        }
     }
 
     /// The responses of [`EvalsApi::create_eval_run`], one per status the spec declares.
@@ -22579,6 +25431,9 @@ pub mod evals_api {
             Ok(request) => request,
             Err(error) => return api.invalid_request(error),
         };
+        if let Err(errors) = crate::models::validation::Validate::validate(&request) {
+            return api.invalid_request(super::RequestError::invalid(errors));
+        }
         match api.create_eval_run(request).await {
             Ok(response) => axum::response::IntoResponse::into_response(response),
             Err(error) => api.server_error(error),
@@ -23541,6 +26396,23 @@ pub mod files_api {
         pub headers: http::HeaderMap,
     }
 
+    /// The spec's validation keywords of the parameters, at `path.<name>` and `query.<name>`, and of the body, at
+    /// `body`.
+    #[cfg(feature = "file")]
+    impl crate::models::validation::Validate for CreateFileRequest {
+        fn validate_into(
+            &self,
+            path: &crate::models::validation::Path<'_>,
+            errors: &mut Vec<crate::models::validation::ValidationError>,
+        ) {
+            crate::models::validation::Validate::validate_into(
+                &self.body,
+                &path.field("body"),
+                errors,
+            );
+        }
+    }
+
     /// The `multipart/form-data` body of [`FilesApi::create_file`]: a field per property, a
     /// [`FilePart`](super::FilePart) per file.
     #[cfg(feature = "file")]
@@ -23552,6 +26424,21 @@ pub mod files_api {
         pub purpose: String,
         /// `expires_after`
         pub expires_after: Option<models::FileExpirationAfter>,
+    }
+
+    #[cfg(feature = "file")]
+    impl crate::models::validation::Validate for CreateFileForm {
+        fn validate_into(
+            &self,
+            path: &crate::models::validation::Path<'_>,
+            errors: &mut Vec<crate::models::validation::ValidationError>,
+        ) {
+            crate::models::validation::Validate::validate_into(
+                &self.expires_after,
+                &path.field("expires_after"),
+                errors,
+            );
+        }
     }
 
     #[cfg(feature = "file")]
@@ -23618,6 +26505,9 @@ pub mod files_api {
             Ok(request) => request,
             Err(error) => return api.invalid_request(error),
         };
+        if let Err(errors) = crate::models::validation::Validate::validate(&request) {
+            return api.invalid_request(super::RequestError::invalid(errors));
+        }
         match api.create_file(request).await {
             Ok(response) => axum::response::IntoResponse::into_response(response),
             Err(error) => api.server_error(error),
@@ -24421,6 +27311,23 @@ pub mod fine_tuning_api {
         pub headers: http::HeaderMap,
     }
 
+    /// The spec's validation keywords of the parameters, at `path.<name>` and `query.<name>`, and of the body, at
+    /// `body`.
+    #[cfg(feature = "finetuning")]
+    impl crate::models::validation::Validate for CreateFineTuningJobRequest {
+        fn validate_into(
+            &self,
+            path: &crate::models::validation::Path<'_>,
+            errors: &mut Vec<crate::models::validation::ValidationError>,
+        ) {
+            crate::models::validation::Validate::validate_into(
+                &self.body,
+                &path.field("body"),
+                errors,
+            );
+        }
+    }
+
     /// The responses of [`FineTuningApi::create_fine_tuning_job`], one per status the spec declares.
     #[cfg(feature = "finetuning")]
     #[derive(Clone, Debug)]
@@ -24463,6 +27370,9 @@ pub mod fine_tuning_api {
             Ok(request) => request,
             Err(error) => return api.invalid_request(error),
         };
+        if let Err(errors) = crate::models::validation::Validate::validate(&request) {
+            return api.invalid_request(super::RequestError::invalid(errors));
+        }
         match api.create_fine_tuning_job(request).await {
             Ok(response) => axum::response::IntoResponse::into_response(response),
             Err(error) => api.server_error(error),
@@ -25221,6 +28131,23 @@ pub mod fine_tuning_api {
         pub headers: http::HeaderMap,
     }
 
+    /// The spec's validation keywords of the parameters, at `path.<name>` and `query.<name>`, and of the body, at
+    /// `body`.
+    #[cfg(feature = "finetuning")]
+    impl crate::models::validation::Validate for RunGraderRequest {
+        fn validate_into(
+            &self,
+            path: &crate::models::validation::Path<'_>,
+            errors: &mut Vec<crate::models::validation::ValidationError>,
+        ) {
+            crate::models::validation::Validate::validate_into(
+                &self.body,
+                &path.field("body"),
+                errors,
+            );
+        }
+    }
+
     /// The responses of [`FineTuningApi::run_grader`], one per status the spec declares.
     #[cfg(feature = "finetuning")]
     #[derive(Clone, Debug)]
@@ -25263,6 +28190,9 @@ pub mod fine_tuning_api {
             Ok(request) => request,
             Err(error) => return api.invalid_request(error),
         };
+        if let Err(errors) = crate::models::validation::Validate::validate(&request) {
+            return api.invalid_request(super::RequestError::invalid(errors));
+        }
         match api.run_grader(request).await {
             Ok(response) => axum::response::IntoResponse::into_response(response),
             Err(error) => api.server_error(error),
@@ -25288,6 +28218,23 @@ pub mod fine_tuning_api {
         pub body: models::ValidateGraderRequest,
         /// The request's headers, with its header and cookie parameters and credentials.
         pub headers: http::HeaderMap,
+    }
+
+    /// The spec's validation keywords of the parameters, at `path.<name>` and `query.<name>`, and of the body, at
+    /// `body`.
+    #[cfg(feature = "finetuning")]
+    impl crate::models::validation::Validate for ValidateGraderRequest {
+        fn validate_into(
+            &self,
+            path: &crate::models::validation::Path<'_>,
+            errors: &mut Vec<crate::models::validation::ValidationError>,
+        ) {
+            crate::models::validation::Validate::validate_into(
+                &self.body,
+                &path.field("body"),
+                errors,
+            );
+        }
     }
 
     /// The responses of [`FineTuningApi::validate_grader`], one per status the spec declares.
@@ -25332,6 +28279,9 @@ pub mod fine_tuning_api {
             Ok(request) => request,
             Err(error) => return api.invalid_request(error),
         };
+        if let Err(errors) = crate::models::validation::Validate::validate(&request) {
+            return api.invalid_request(super::RequestError::invalid(errors));
+        }
         match api.validate_grader(request).await {
             Ok(response) => axum::response::IntoResponse::into_response(response),
             Err(error) => api.server_error(error),
@@ -25557,6 +28507,32 @@ pub mod group_organization_role_assignments_api {
         pub headers: http::HeaderMap,
     }
 
+    /// The spec's validation keywords of the parameters, at `path.<name>` and `query.<name>`, and of the body, at
+    /// `body`.
+    #[cfg(feature = "administration")]
+    impl crate::models::validation::Validate for ListGroupRoleAssignmentsRequest {
+        fn validate_into(
+            &self,
+            path: &crate::models::validation::Path<'_>,
+            errors: &mut Vec<crate::models::validation::ValidationError>,
+        ) {
+            if let Some(value0) = &self.limit {
+                crate::models::validation::minimum(
+                    *value0,
+                    0,
+                    &path.field("query").field("limit"),
+                    errors,
+                );
+                crate::models::validation::maximum(
+                    *value0,
+                    1000,
+                    &path.field("query").field("limit"),
+                    errors,
+                );
+            }
+        }
+    }
+
     /// The responses of [`GroupOrganizationRoleAssignmentsApi::list_group_role_assignments`], one per status the spec declares.
     #[cfg(feature = "administration")]
     #[derive(Clone, Debug)]
@@ -25627,6 +28603,9 @@ pub mod group_organization_role_assignments_api {
             Ok(request) => request,
             Err(error) => return api.invalid_request(error),
         };
+        if let Err(errors) = crate::models::validation::Validate::validate(&request) {
+            return api.invalid_request(super::RequestError::invalid(errors));
+        }
         match api.list_group_role_assignments(request).await {
             Ok(response) => axum::response::IntoResponse::into_response(response),
             Err(error) => api.server_error(error),
@@ -26052,6 +29031,32 @@ pub mod group_users_api {
         pub headers: http::HeaderMap,
     }
 
+    /// The spec's validation keywords of the parameters, at `path.<name>` and `query.<name>`, and of the body, at
+    /// `body`.
+    #[cfg(feature = "administration")]
+    impl crate::models::validation::Validate for ListGroupUsersRequest {
+        fn validate_into(
+            &self,
+            path: &crate::models::validation::Path<'_>,
+            errors: &mut Vec<crate::models::validation::ValidationError>,
+        ) {
+            if let Some(value0) = &self.limit {
+                crate::models::validation::minimum(
+                    *value0,
+                    0,
+                    &path.field("query").field("limit"),
+                    errors,
+                );
+                crate::models::validation::maximum(
+                    *value0,
+                    1000,
+                    &path.field("query").field("limit"),
+                    errors,
+                );
+            }
+        }
+    }
+
     /// The responses of [`GroupUsersApi::list_group_users`], one per status the spec declares.
     #[cfg(feature = "administration")]
     #[derive(Clone, Debug)]
@@ -26127,6 +29132,9 @@ pub mod group_users_api {
             Ok(request) => request,
             Err(error) => return api.invalid_request(error),
         };
+        if let Err(errors) = crate::models::validation::Validate::validate(&request) {
+            return api.invalid_request(super::RequestError::invalid(errors));
+        }
         match api.list_group_users(request).await {
             Ok(response) => axum::response::IntoResponse::into_response(response),
             Err(error) => api.server_error(error),
@@ -26457,6 +29465,23 @@ pub mod groups_api {
         pub headers: http::HeaderMap,
     }
 
+    /// The spec's validation keywords of the parameters, at `path.<name>` and `query.<name>`, and of the body, at
+    /// `body`.
+    #[cfg(feature = "administration")]
+    impl crate::models::validation::Validate for CreateGroupRequest {
+        fn validate_into(
+            &self,
+            path: &crate::models::validation::Path<'_>,
+            errors: &mut Vec<crate::models::validation::ValidationError>,
+        ) {
+            crate::models::validation::Validate::validate_into(
+                &self.body,
+                &path.field("body"),
+                errors,
+            );
+        }
+    }
+
     /// The responses of [`GroupsApi::create_group`], one per status the spec declares.
     #[cfg(feature = "administration")]
     #[derive(Clone, Debug)]
@@ -26522,6 +29547,9 @@ pub mod groups_api {
             Ok(request) => request,
             Err(error) => return api.invalid_request(error),
         };
+        if let Err(errors) = crate::models::validation::Validate::validate(&request) {
+            return api.invalid_request(super::RequestError::invalid(errors));
+        }
         match api.create_group(request).await {
             Ok(response) => axum::response::IntoResponse::into_response(response),
             Err(error) => api.server_error(error),
@@ -26648,6 +29676,32 @@ pub mod groups_api {
         pub headers: http::HeaderMap,
     }
 
+    /// The spec's validation keywords of the parameters, at `path.<name>` and `query.<name>`, and of the body, at
+    /// `body`.
+    #[cfg(feature = "administration")]
+    impl crate::models::validation::Validate for ListGroupsRequest {
+        fn validate_into(
+            &self,
+            path: &crate::models::validation::Path<'_>,
+            errors: &mut Vec<crate::models::validation::ValidationError>,
+        ) {
+            if let Some(value0) = &self.limit {
+                crate::models::validation::minimum(
+                    *value0,
+                    0,
+                    &path.field("query").field("limit"),
+                    errors,
+                );
+                crate::models::validation::maximum(
+                    *value0,
+                    1000,
+                    &path.field("query").field("limit"),
+                    errors,
+                );
+            }
+        }
+    }
+
     /// The responses of [`GroupsApi::list_groups`], one per status the spec declares.
     #[cfg(feature = "administration")]
     #[derive(Clone, Debug)]
@@ -26704,6 +29758,9 @@ pub mod groups_api {
             Ok(request) => request,
             Err(error) => return api.invalid_request(error),
         };
+        if let Err(errors) = crate::models::validation::Validate::validate(&request) {
+            return api.invalid_request(super::RequestError::invalid(errors));
+        }
         match api.list_groups(request).await {
             Ok(response) => axum::response::IntoResponse::into_response(response),
             Err(error) => api.server_error(error),
@@ -26835,6 +29892,23 @@ pub mod groups_api {
         pub headers: http::HeaderMap,
     }
 
+    /// The spec's validation keywords of the parameters, at `path.<name>` and `query.<name>`, and of the body, at
+    /// `body`.
+    #[cfg(feature = "administration")]
+    impl crate::models::validation::Validate for UpdateGroupRequest {
+        fn validate_into(
+            &self,
+            path: &crate::models::validation::Path<'_>,
+            errors: &mut Vec<crate::models::validation::ValidationError>,
+        ) {
+            crate::models::validation::Validate::validate_into(
+                &self.body,
+                &path.field("body"),
+                errors,
+            );
+        }
+    }
+
     /// The responses of [`GroupsApi::update_group`], one per status the spec declares.
     #[cfg(feature = "administration")]
     #[derive(Clone, Debug)]
@@ -26909,6 +29983,9 @@ pub mod groups_api {
             Ok(request) => request,
             Err(error) => return api.invalid_request(error),
         };
+        if let Err(errors) = crate::models::validation::Validate::validate(&request) {
+            return api.invalid_request(super::RequestError::invalid(errors));
+        }
         match api.update_group(request).await {
             Ok(response) => axum::response::IntoResponse::into_response(response),
             Err(error) => api.server_error(error),
@@ -27264,6 +30341,23 @@ pub mod images_api {
         pub headers: http::HeaderMap,
     }
 
+    /// The spec's validation keywords of the parameters, at `path.<name>` and `query.<name>`, and of the body, at
+    /// `body`.
+    #[cfg(feature = "image")]
+    impl crate::models::validation::Validate for CreateImageRequest {
+        fn validate_into(
+            &self,
+            path: &crate::models::validation::Path<'_>,
+            errors: &mut Vec<crate::models::validation::ValidationError>,
+        ) {
+            crate::models::validation::Validate::validate_into(
+                &self.body,
+                &path.field("body"),
+                errors,
+            );
+        }
+    }
+
     /// The responses of [`ImagesApi::create_image`], one per status the spec declares.
     #[cfg(feature = "image")]
     #[derive(Debug)]
@@ -27340,6 +30434,9 @@ pub mod images_api {
             Ok(request) => request,
             Err(error) => return api.invalid_request(error),
         };
+        if let Err(errors) = crate::models::validation::Validate::validate(&request) {
+            return api.invalid_request(super::RequestError::invalid(errors));
+        }
         match api.create_image(request).await {
             Ok(response) => axum::response::IntoResponse::into_response(response),
             Err(error) => api.server_error(error),
@@ -27367,6 +30464,23 @@ pub mod images_api {
         pub headers: http::HeaderMap,
     }
 
+    /// The spec's validation keywords of the parameters, at `path.<name>` and `query.<name>`, and of the body, at
+    /// `body`.
+    #[cfg(feature = "image")]
+    impl crate::models::validation::Validate for CreateImageEditRequest {
+        fn validate_into(
+            &self,
+            path: &crate::models::validation::Path<'_>,
+            errors: &mut Vec<crate::models::validation::ValidationError>,
+        ) {
+            crate::models::validation::Validate::validate_into(
+                &self.body,
+                &path.field("body"),
+                errors,
+            );
+        }
+    }
+
     /// The request body of [`ImagesApi::create_image_edit`], one of the media types the spec gives it: a variant per kind,
     /// chosen by the request's `Content-Type`.
     #[cfg(feature = "image")]
@@ -27376,6 +30490,24 @@ pub mod images_api {
         Multipart(CreateImageEditForm),
         /// `application/json`
         Json(models::EditImageBodyJsonParam),
+    }
+
+    #[cfg(feature = "image")]
+    impl crate::models::validation::Validate for CreateImageEditBody {
+        fn validate_into(
+            &self,
+            path: &crate::models::validation::Path<'_>,
+            errors: &mut Vec<crate::models::validation::ValidationError>,
+        ) {
+            match self {
+                CreateImageEditBody::Multipart(value) => {
+                    crate::models::validation::Validate::validate_into(value, path, errors);
+                }
+                CreateImageEditBody::Json(value) => {
+                    crate::models::validation::Validate::validate_into(value, path, errors);
+                }
+            }
+        }
     }
 
     #[cfg(feature = "image")]
@@ -27452,6 +30584,60 @@ pub mod images_api {
         pub partial_images: Option<i64>,
         /// `quality`: The quality of the image that will be generated for GPT image models. The GPT image models support `low`, `medium`, and `high`. `gpt-image-2.5-sunburst` and `gpt-image-2.5-flare`, including their `2026-09-08` snapshots, also support `xhigh` and `max`. Defaults to `auto`. Defaults to `\"auto\"`.
         pub quality: Option<String>,
+    }
+
+    #[cfg(feature = "image")]
+    impl crate::models::validation::Validate for CreateImageEditForm {
+        fn validate_into(
+            &self,
+            path: &crate::models::validation::Path<'_>,
+            errors: &mut Vec<crate::models::validation::ValidationError>,
+        ) {
+            if let Some(value0) = &self.frame_count {
+                crate::models::validation::minimum(*value0, 2, &path.field("frame_count"), errors);
+                crate::models::validation::maximum(*value0, 16, &path.field("frame_count"), errors);
+            }
+            if let Some(value0) = &self.frame_duration_ms {
+                crate::models::validation::minimum(
+                    *value0,
+                    20,
+                    &path.field("frame_duration_ms"),
+                    errors,
+                );
+            }
+            if let Some(value0) = &self.n {
+                crate::models::validation::minimum(*value0, 1, &path.field("n"), errors);
+                crate::models::validation::maximum(*value0, 10, &path.field("n"), errors);
+            }
+            crate::models::validation::Validate::validate_into(
+                &self.svg,
+                &path.field("svg"),
+                errors,
+            );
+            if let Some(value0) = &self.safety_identifier {
+                crate::models::validation::length(
+                    value0,
+                    None,
+                    Some(128),
+                    &path.field("safety_identifier"),
+                    errors,
+                );
+            }
+            if let Some(value0) = &self.partial_images {
+                crate::models::validation::minimum(
+                    *value0,
+                    0,
+                    &path.field("partial_images"),
+                    errors,
+                );
+                crate::models::validation::maximum(
+                    *value0,
+                    3,
+                    &path.field("partial_images"),
+                    errors,
+                );
+            }
+        }
     }
 
     #[cfg(feature = "image")]
@@ -27598,6 +30784,9 @@ pub mod images_api {
             Ok(request) => request,
             Err(error) => return api.invalid_request(error),
         };
+        if let Err(errors) = crate::models::validation::Validate::validate(&request) {
+            return api.invalid_request(super::RequestError::invalid(errors));
+        }
         match api.create_image_edit(request).await {
             Ok(response) => axum::response::IntoResponse::into_response(response),
             Err(error) => api.server_error(error),
@@ -27622,6 +30811,23 @@ pub mod images_api {
         pub headers: http::HeaderMap,
     }
 
+    /// The spec's validation keywords of the parameters, at `path.<name>` and `query.<name>`, and of the body, at
+    /// `body`.
+    #[cfg(feature = "image")]
+    impl crate::models::validation::Validate for CreateImageVariationRequest {
+        fn validate_into(
+            &self,
+            path: &crate::models::validation::Path<'_>,
+            errors: &mut Vec<crate::models::validation::ValidationError>,
+        ) {
+            crate::models::validation::Validate::validate_into(
+                &self.body,
+                &path.field("body"),
+                errors,
+            );
+        }
+    }
+
     /// The `multipart/form-data` body of [`ImagesApi::create_image_variation`]: a field per property, a
     /// [`FilePart`](super::FilePart) per file.
     #[cfg(feature = "image")]
@@ -27639,6 +30845,20 @@ pub mod images_api {
         pub size: Option<String>,
         /// `user`: A unique identifier representing your end-user, which can help OpenAI to monitor and detect abuse. [Learn more](https://developers.openai.com/api/docs/guides/safety-best-practices#implement-safety-identifiers).
         pub user: Option<String>,
+    }
+
+    #[cfg(feature = "image")]
+    impl crate::models::validation::Validate for CreateImageVariationForm {
+        fn validate_into(
+            &self,
+            path: &crate::models::validation::Path<'_>,
+            errors: &mut Vec<crate::models::validation::ValidationError>,
+        ) {
+            if let Some(value0) = &self.n {
+                crate::models::validation::minimum(*value0, 1, &path.field("n"), errors);
+                crate::models::validation::maximum(*value0, 10, &path.field("n"), errors);
+            }
+        }
     }
 
     #[cfg(feature = "image")]
@@ -27719,6 +30939,9 @@ pub mod images_api {
             Ok(request) => request,
             Err(error) => return api.invalid_request(error),
         };
+        if let Err(errors) = crate::models::validation::Validate::validate(&request) {
+            return api.invalid_request(super::RequestError::invalid(errors));
+        }
         match api.create_image_variation(request).await {
             Ok(response) => axum::response::IntoResponse::into_response(response),
             Err(error) => api.server_error(error),
@@ -28323,6 +31546,23 @@ pub mod live_api {
         pub headers: http::HeaderMap,
     }
 
+    /// The spec's validation keywords of the parameters, at `path.<name>` and `query.<name>`, and of the body, at
+    /// `body`.
+    #[cfg(feature = "live")]
+    impl crate::models::validation::Validate for AcceptLiveSessionRequest {
+        fn validate_into(
+            &self,
+            path: &crate::models::validation::Path<'_>,
+            errors: &mut Vec<crate::models::validation::ValidationError>,
+        ) {
+            crate::models::validation::Validate::validate_into(
+                &self.body,
+                &path.field("body"),
+                errors,
+            );
+        }
+    }
+
     /// The responses of [`LiveApi::accept_live_session`], one per status the spec declares.
     #[cfg(feature = "live")]
     #[derive(Clone, Debug)]
@@ -28402,6 +31642,9 @@ pub mod live_api {
             Ok(request) => request,
             Err(error) => return api.invalid_request(error),
         };
+        if let Err(errors) = crate::models::validation::Validate::validate(&request) {
+            return api.invalid_request(super::RequestError::invalid(errors));
+        }
         match api.accept_live_session(request).await {
             Ok(response) => axum::response::IntoResponse::into_response(response),
             Err(error) => api.server_error(error),
@@ -28429,6 +31672,23 @@ pub mod live_api {
         pub body: models::LiveSessionCreateRequest,
         /// The request's headers, with its header and cookie parameters and credentials.
         pub headers: http::HeaderMap,
+    }
+
+    /// The spec's validation keywords of the parameters, at `path.<name>` and `query.<name>`, and of the body, at
+    /// `body`.
+    #[cfg(feature = "live")]
+    impl crate::models::validation::Validate for CreateLiveRequest {
+        fn validate_into(
+            &self,
+            path: &crate::models::validation::Path<'_>,
+            errors: &mut Vec<crate::models::validation::ValidationError>,
+        ) {
+            crate::models::validation::Validate::validate_into(
+                &self.body,
+                &path.field("body"),
+                errors,
+            );
+        }
     }
 
     /// The responses of [`LiveApi::create_live`], one per status the spec declares.
@@ -28528,6 +31788,9 @@ pub mod live_api {
             Ok(request) => request,
             Err(error) => return api.invalid_request(error),
         };
+        if let Err(errors) = crate::models::validation::Validate::validate(&request) {
+            return api.invalid_request(super::RequestError::invalid(errors));
+        }
         match api.create_live(request).await {
             Ok(response) => axum::response::IntoResponse::into_response(response),
             Err(error) => api.server_error(error),
@@ -28553,6 +31816,25 @@ pub mod live_api {
         pub session_id: String,
         /// The request's headers, with its header and cookie parameters and credentials.
         pub headers: http::HeaderMap,
+    }
+
+    /// The spec's validation keywords of the parameters, at `path.<name>` and `query.<name>`, and of the body, at
+    /// `body`.
+    #[cfg(feature = "live")]
+    impl crate::models::validation::Validate for DownloadLiveRecordingRequest {
+        fn validate_into(
+            &self,
+            path: &crate::models::validation::Path<'_>,
+            errors: &mut Vec<crate::models::validation::ValidationError>,
+        ) {
+            super::pattern(
+                &self.session_id,
+                &super::PATTERN_0,
+                r"^live_[A-Za-z0-9_-]{1,128}$",
+                &path.field("path").field("session_id"),
+                errors,
+            );
+        }
     }
 
     /// The responses of [`LiveApi::download_live_recording`], one per status the spec declares.
@@ -28634,6 +31916,9 @@ pub mod live_api {
             Ok(request) => request,
             Err(error) => return api.invalid_request(error),
         };
+        if let Err(errors) = crate::models::validation::Validate::validate(&request) {
+            return api.invalid_request(super::RequestError::invalid(errors));
+        }
         match api.download_live_recording(request).await {
             Ok(response) => axum::response::IntoResponse::into_response(response),
             Err(error) => api.server_error(error),
@@ -28661,6 +31946,23 @@ pub mod live_api {
         pub body: models::LiveForkRequest,
         /// The request's headers, with its header and cookie parameters and credentials.
         pub headers: http::HeaderMap,
+    }
+
+    /// The spec's validation keywords of the parameters, at `path.<name>` and `query.<name>`, and of the body, at
+    /// `body`.
+    #[cfg(feature = "live")]
+    impl crate::models::validation::Validate for ForkLiveSessionRequest {
+        fn validate_into(
+            &self,
+            path: &crate::models::validation::Path<'_>,
+            errors: &mut Vec<crate::models::validation::ValidationError>,
+        ) {
+            crate::models::validation::Validate::validate_into(
+                &self.body,
+                &path.field("body"),
+                errors,
+            );
+        }
     }
 
     /// The responses of [`LiveApi::fork_live_session`], one per status the spec declares.
@@ -28745,6 +32047,9 @@ pub mod live_api {
             Ok(request) => request,
             Err(error) => return api.invalid_request(error),
         };
+        if let Err(errors) = crate::models::validation::Validate::validate(&request) {
+            return api.invalid_request(super::RequestError::invalid(errors));
+        }
         match api.fork_live_session(request).await {
             Ok(response) => axum::response::IntoResponse::into_response(response),
             Err(error) => api.server_error(error),
@@ -28948,6 +32253,23 @@ pub mod live_api {
         pub headers: http::HeaderMap,
     }
 
+    /// The spec's validation keywords of the parameters, at `path.<name>` and `query.<name>`, and of the body, at
+    /// `body`.
+    #[cfg(feature = "live")]
+    impl crate::models::validation::Validate for RejectLiveSessionRequest {
+        fn validate_into(
+            &self,
+            path: &crate::models::validation::Path<'_>,
+            errors: &mut Vec<crate::models::validation::ValidationError>,
+        ) {
+            crate::models::validation::Validate::validate_into(
+                &self.body,
+                &path.field("body"),
+                errors,
+            );
+        }
+    }
+
     /// The responses of [`LiveApi::reject_live_session`], one per status the spec declares.
     #[cfg(feature = "live")]
     #[derive(Clone, Debug)]
@@ -29017,6 +32339,9 @@ pub mod live_api {
             Ok(request) => request,
             Err(error) => return api.invalid_request(error),
         };
+        if let Err(errors) = crate::models::validation::Validate::validate(&request) {
+            return api.invalid_request(super::RequestError::invalid(errors));
+        }
         match api.reject_live_session(request).await {
             Ok(response) => axum::response::IntoResponse::into_response(response),
             Err(error) => api.server_error(error),
@@ -29668,6 +32993,32 @@ pub mod project_group_role_assignments_api {
         pub headers: http::HeaderMap,
     }
 
+    /// The spec's validation keywords of the parameters, at `path.<name>` and `query.<name>`, and of the body, at
+    /// `body`.
+    #[cfg(feature = "administration")]
+    impl crate::models::validation::Validate for ListProjectGroupRoleAssignmentsRequest {
+        fn validate_into(
+            &self,
+            path: &crate::models::validation::Path<'_>,
+            errors: &mut Vec<crate::models::validation::ValidationError>,
+        ) {
+            if let Some(value0) = &self.limit {
+                crate::models::validation::minimum(
+                    *value0,
+                    0,
+                    &path.field("query").field("limit"),
+                    errors,
+                );
+                crate::models::validation::maximum(
+                    *value0,
+                    1000,
+                    &path.field("query").field("limit"),
+                    errors,
+                );
+            }
+        }
+    }
+
     /// The responses of [`ProjectGroupRoleAssignmentsApi::list_project_group_role_assignments`], one per status the spec declares.
     #[cfg(feature = "administration")]
     #[derive(Clone, Debug)]
@@ -29738,6 +33089,9 @@ pub mod project_group_role_assignments_api {
             Ok(request) => request,
             Err(error) => return api.invalid_request(error),
         };
+        if let Err(errors) = crate::models::validation::Validate::validate(&request) {
+            return api.invalid_request(super::RequestError::invalid(errors));
+        }
         match api.list_project_group_role_assignments(request).await {
             Ok(response) => axum::response::IntoResponse::into_response(response),
             Err(error) => api.server_error(error),
@@ -30175,6 +33529,32 @@ pub mod project_groups_api {
         pub headers: http::HeaderMap,
     }
 
+    /// The spec's validation keywords of the parameters, at `path.<name>` and `query.<name>`, and of the body, at
+    /// `body`.
+    #[cfg(feature = "administration")]
+    impl crate::models::validation::Validate for ListProjectGroupsRequest {
+        fn validate_into(
+            &self,
+            path: &crate::models::validation::Path<'_>,
+            errors: &mut Vec<crate::models::validation::ValidationError>,
+        ) {
+            if let Some(value0) = &self.limit {
+                crate::models::validation::minimum(
+                    *value0,
+                    0,
+                    &path.field("query").field("limit"),
+                    errors,
+                );
+                crate::models::validation::maximum(
+                    *value0,
+                    100,
+                    &path.field("query").field("limit"),
+                    errors,
+                );
+            }
+        }
+    }
+
     /// The responses of [`ProjectGroupsApi::list_project_groups`], one per status the spec declares.
     #[cfg(feature = "administration")]
     #[derive(Clone, Debug)]
@@ -30245,6 +33625,9 @@ pub mod project_groups_api {
             Ok(request) => request,
             Err(error) => return api.invalid_request(error),
         };
+        if let Err(errors) = crate::models::validation::Validate::validate(&request) {
+            return api.invalid_request(super::RequestError::invalid(errors));
+        }
         match api.list_project_groups(request).await {
             Ok(response) => axum::response::IntoResponse::into_response(response),
             Err(error) => api.server_error(error),
@@ -30684,6 +34067,32 @@ pub mod project_user_role_assignments_api {
         pub headers: http::HeaderMap,
     }
 
+    /// The spec's validation keywords of the parameters, at `path.<name>` and `query.<name>`, and of the body, at
+    /// `body`.
+    #[cfg(feature = "administration")]
+    impl crate::models::validation::Validate for ListProjectUserRoleAssignmentsRequest {
+        fn validate_into(
+            &self,
+            path: &crate::models::validation::Path<'_>,
+            errors: &mut Vec<crate::models::validation::ValidationError>,
+        ) {
+            if let Some(value0) = &self.limit {
+                crate::models::validation::minimum(
+                    *value0,
+                    0,
+                    &path.field("query").field("limit"),
+                    errors,
+                );
+                crate::models::validation::maximum(
+                    *value0,
+                    1000,
+                    &path.field("query").field("limit"),
+                    errors,
+                );
+            }
+        }
+    }
+
     /// The responses of [`ProjectUserRoleAssignmentsApi::list_project_user_role_assignments`], one per status the spec declares.
     #[cfg(feature = "administration")]
     #[derive(Clone, Debug)]
@@ -30754,6 +34163,9 @@ pub mod project_user_role_assignments_api {
             Ok(request) => request,
             Err(error) => return api.invalid_request(error),
         };
+        if let Err(errors) = crate::models::validation::Validate::validate(&request) {
+            return api.invalid_request(super::RequestError::invalid(errors));
+        }
         match api.list_project_user_role_assignments(request).await {
             Ok(response) => axum::response::IntoResponse::into_response(response),
             Err(error) => api.server_error(error),
@@ -31593,6 +35005,23 @@ pub mod projects_api {
         pub headers: http::HeaderMap,
     }
 
+    /// The spec's validation keywords of the parameters, at `path.<name>` and `query.<name>`, and of the body, at
+    /// `body`.
+    #[cfg(feature = "administration")]
+    impl crate::models::validation::Validate for CreateProjectServiceAccountRequest {
+        fn validate_into(
+            &self,
+            path: &crate::models::validation::Path<'_>,
+            errors: &mut Vec<crate::models::validation::ValidationError>,
+        ) {
+            crate::models::validation::Validate::validate_into(
+                &self.body,
+                &path.field("body"),
+                errors,
+            );
+        }
+    }
+
     /// The responses of [`ProjectsApi::create_project_service_account`], one per status the spec declares.
     #[cfg(feature = "administration")]
     #[derive(Clone, Debug)]
@@ -31664,6 +35093,9 @@ pub mod projects_api {
             Ok(request) => request,
             Err(error) => return api.invalid_request(error),
         };
+        if let Err(errors) = crate::models::validation::Validate::validate(&request) {
+            return api.invalid_request(super::RequestError::invalid(errors));
+        }
         match api.create_project_service_account(request).await {
             Ok(response) => axum::response::IntoResponse::into_response(response),
             Err(error) => api.server_error(error),
@@ -33341,6 +36773,23 @@ pub mod projects_api {
         pub headers: http::HeaderMap,
     }
 
+    /// The spec's validation keywords of the parameters, at `path.<name>` and `query.<name>`, and of the body, at
+    /// `body`.
+    #[cfg(feature = "administration")]
+    impl crate::models::validation::Validate for UpdateProjectApiKeyRequest {
+        fn validate_into(
+            &self,
+            path: &crate::models::validation::Path<'_>,
+            errors: &mut Vec<crate::models::validation::ValidationError>,
+        ) {
+            crate::models::validation::Validate::validate_into(
+                &self.body,
+                &path.field("body"),
+                errors,
+            );
+        }
+    }
+
     /// The responses of [`ProjectsApi::update_project_api_key`], one per status the spec declares.
     #[cfg(feature = "administration")]
     #[derive(Clone, Debug)]
@@ -33407,6 +36856,9 @@ pub mod projects_api {
             Ok(request) => request,
             Err(error) => return api.invalid_request(error),
         };
+        if let Err(errors) = crate::models::validation::Validate::validate(&request) {
+            return api.invalid_request(super::RequestError::invalid(errors));
+        }
         match api.update_project_api_key(request).await {
             Ok(response) => axum::response::IntoResponse::into_response(response),
             Err(error) => api.server_error(error),
@@ -33913,6 +37365,23 @@ pub mod realtime_api {
         pub headers: http::HeaderMap,
     }
 
+    /// The spec's validation keywords of the parameters, at `path.<name>` and `query.<name>`, and of the body, at
+    /// `body`.
+    #[cfg(feature = "realtime")]
+    impl crate::models::validation::Validate for AcceptRealtimeCallRequest {
+        fn validate_into(
+            &self,
+            path: &crate::models::validation::Path<'_>,
+            errors: &mut Vec<crate::models::validation::ValidationError>,
+        ) {
+            crate::models::validation::Validate::validate_into(
+                &self.body,
+                &path.field("body"),
+                errors,
+            );
+        }
+    }
+
     /// The responses of [`RealtimeApi::accept_realtime_call`], one per status the spec declares.
     #[cfg(feature = "realtime")]
     #[derive(Clone, Debug)]
@@ -33977,6 +37446,9 @@ pub mod realtime_api {
             Ok(request) => request,
             Err(error) => return api.invalid_request(error),
         };
+        if let Err(errors) = crate::models::validation::Validate::validate(&request) {
+            return api.invalid_request(super::RequestError::invalid(errors));
+        }
         match api.accept_realtime_call(request).await {
             Ok(response) => axum::response::IntoResponse::into_response(response),
             Err(error) => api.server_error(error),
@@ -34006,6 +37478,23 @@ pub mod realtime_api {
         pub headers: http::HeaderMap,
     }
 
+    /// The spec's validation keywords of the parameters, at `path.<name>` and `query.<name>`, and of the body, at
+    /// `body`.
+    #[cfg(feature = "realtime")]
+    impl crate::models::validation::Validate for CreateRealtimeCallRequest {
+        fn validate_into(
+            &self,
+            path: &crate::models::validation::Path<'_>,
+            errors: &mut Vec<crate::models::validation::ValidationError>,
+        ) {
+            crate::models::validation::Validate::validate_into(
+                &self.body,
+                &path.field("body"),
+                errors,
+            );
+        }
+    }
+
     /// The request body of [`RealtimeApi::create_realtime_call`], one of the media types the spec gives it: a variant per kind,
     /// chosen by the request's `Content-Type`.
     #[cfg(feature = "realtime")]
@@ -34015,6 +37504,19 @@ pub mod realtime_api {
         Multipart(CreateRealtimeCallForm),
         /// `application/sdp`
         Sdp(String),
+    }
+
+    #[cfg(feature = "realtime")]
+    impl crate::models::validation::Validate for CreateRealtimeCallBody {
+        fn validate_into(
+            &self,
+            path: &crate::models::validation::Path<'_>,
+            errors: &mut Vec<crate::models::validation::ValidationError>,
+        ) {
+            if let CreateRealtimeCallBody::Multipart(value) = self {
+                crate::models::validation::Validate::validate_into(value, path, errors);
+            }
+        }
     }
 
     #[cfg(feature = "realtime")]
@@ -34053,6 +37555,21 @@ pub mod realtime_api {
         pub sdp: String,
         /// `session`: Optional session configuration to apply before the realtime session is created. Use the same parameters you would send in a [`create client secret`](https://developers.openai.com/api/reference/resources/realtime/subresources/client_secrets/methods/create) request.
         pub session: Option<models::RealtimeSessionCreateRequestGa>,
+    }
+
+    #[cfg(feature = "realtime")]
+    impl crate::models::validation::Validate for CreateRealtimeCallForm {
+        fn validate_into(
+            &self,
+            path: &crate::models::validation::Path<'_>,
+            errors: &mut Vec<crate::models::validation::ValidationError>,
+        ) {
+            crate::models::validation::Validate::validate_into(
+                &self.session,
+                &path.field("session"),
+                errors,
+            );
+        }
     }
 
     #[cfg(feature = "realtime")]
@@ -34111,6 +37628,9 @@ pub mod realtime_api {
             Ok(request) => request,
             Err(error) => return api.invalid_request(error),
         };
+        if let Err(errors) = crate::models::validation::Validate::validate(&request) {
+            return api.invalid_request(super::RequestError::invalid(errors));
+        }
         match api.create_realtime_call(request).await {
             Ok(response) => axum::response::IntoResponse::into_response(response),
             Err(error) => api.server_error(error),
@@ -34133,6 +37653,23 @@ pub mod realtime_api {
         pub body: models::RealtimeCreateClientSecretRequest,
         /// The request's headers, with its header and cookie parameters and credentials.
         pub headers: http::HeaderMap,
+    }
+
+    /// The spec's validation keywords of the parameters, at `path.<name>` and `query.<name>`, and of the body, at
+    /// `body`.
+    #[cfg(feature = "realtime")]
+    impl crate::models::validation::Validate for CreateRealtimeClientSecretRequest {
+        fn validate_into(
+            &self,
+            path: &crate::models::validation::Path<'_>,
+            errors: &mut Vec<crate::models::validation::ValidationError>,
+        ) {
+            crate::models::validation::Validate::validate_into(
+                &self.body,
+                &path.field("body"),
+                errors,
+            );
+        }
     }
 
     /// The responses of [`RealtimeApi::create_realtime_client_secret`], one per status the spec declares.
@@ -34182,6 +37719,9 @@ pub mod realtime_api {
             Ok(request) => request,
             Err(error) => return api.invalid_request(error),
         };
+        if let Err(errors) = crate::models::validation::Validate::validate(&request) {
+            return api.invalid_request(super::RequestError::invalid(errors));
+        }
         match api.create_realtime_client_secret(request).await {
             Ok(response) => axum::response::IntoResponse::into_response(response),
             Err(error) => api.server_error(error),
@@ -34207,6 +37747,23 @@ pub mod realtime_api {
         pub body: models::RealtimeSessionCreateRequest,
         /// The request's headers, with its header and cookie parameters and credentials.
         pub headers: http::HeaderMap,
+    }
+
+    /// The spec's validation keywords of the parameters, at `path.<name>` and `query.<name>`, and of the body, at
+    /// `body`.
+    #[cfg(feature = "realtime")]
+    impl crate::models::validation::Validate for CreateRealtimeSessionRequest {
+        fn validate_into(
+            &self,
+            path: &crate::models::validation::Path<'_>,
+            errors: &mut Vec<crate::models::validation::ValidationError>,
+        ) {
+            crate::models::validation::Validate::validate_into(
+                &self.body,
+                &path.field("body"),
+                errors,
+            );
+        }
     }
 
     /// The responses of [`RealtimeApi::create_realtime_session`], one per status the spec declares.
@@ -34241,6 +37798,9 @@ pub mod realtime_api {
             Ok(request) => request,
             Err(error) => return api.invalid_request(error),
         };
+        if let Err(errors) = crate::models::validation::Validate::validate(&request) {
+            return api.invalid_request(super::RequestError::invalid(errors));
+        }
         match api.create_realtime_session(request).await {
             Ok(response) => axum::response::IntoResponse::into_response(response),
             Err(error) => api.server_error(error),
@@ -34266,6 +37826,23 @@ pub mod realtime_api {
         pub body: models::RealtimeTranscriptionSessionCreateRequest,
         /// The request's headers, with its header and cookie parameters and credentials.
         pub headers: http::HeaderMap,
+    }
+
+    /// The spec's validation keywords of the parameters, at `path.<name>` and `query.<name>`, and of the body, at
+    /// `body`.
+    #[cfg(feature = "realtime")]
+    impl crate::models::validation::Validate for CreateRealtimeTranscriptionSessionRequest {
+        fn validate_into(
+            &self,
+            path: &crate::models::validation::Path<'_>,
+            errors: &mut Vec<crate::models::validation::ValidationError>,
+        ) {
+            crate::models::validation::Validate::validate_into(
+                &self.body,
+                &path.field("body"),
+                errors,
+            );
+        }
     }
 
     /// The responses of [`RealtimeApi::create_realtime_transcription_session`], one per status the spec declares.
@@ -34300,6 +37877,9 @@ pub mod realtime_api {
             Ok(request) => request,
             Err(error) => return api.invalid_request(error),
         };
+        if let Err(errors) = crate::models::validation::Validate::validate(&request) {
+            return api.invalid_request(super::RequestError::invalid(errors));
+        }
         match api.create_realtime_transcription_session(request).await {
             Ok(response) => axum::response::IntoResponse::into_response(response),
             Err(error) => api.server_error(error),
@@ -34325,6 +37905,23 @@ pub mod realtime_api {
         pub body: models::RealtimeTranslationClientSecretCreateRequest,
         /// The request's headers, with its header and cookie parameters and credentials.
         pub headers: http::HeaderMap,
+    }
+
+    /// The spec's validation keywords of the parameters, at `path.<name>` and `query.<name>`, and of the body, at
+    /// `body`.
+    #[cfg(feature = "realtime")]
+    impl crate::models::validation::Validate for CreateRealtimeTranslationClientSecretRequest {
+        fn validate_into(
+            &self,
+            path: &crate::models::validation::Path<'_>,
+            errors: &mut Vec<crate::models::validation::ValidationError>,
+        ) {
+            crate::models::validation::Validate::validate_into(
+                &self.body,
+                &path.field("body"),
+                errors,
+            );
+        }
     }
 
     /// The responses of [`RealtimeApi::create_realtime_translation_client_secret`], one per status the spec declares.
@@ -34374,6 +37971,9 @@ pub mod realtime_api {
             Ok(request) => request,
             Err(error) => return api.invalid_request(error),
         };
+        if let Err(errors) = crate::models::validation::Validate::validate(&request) {
+            return api.invalid_request(super::RequestError::invalid(errors));
+        }
         match api.create_realtime_translation_client_secret(request).await {
             Ok(response) => axum::response::IntoResponse::into_response(response),
             Err(error) => api.server_error(error),
@@ -34931,6 +38531,23 @@ pub mod responses_api {
         pub headers: http::HeaderMap,
     }
 
+    /// The spec's validation keywords of the parameters, at `path.<name>` and `query.<name>`, and of the body, at
+    /// `body`.
+    #[cfg(feature = "responses")]
+    impl crate::models::validation::Validate for BetaCompactconversationRequest {
+        fn validate_into(
+            &self,
+            path: &crate::models::validation::Path<'_>,
+            errors: &mut Vec<crate::models::validation::ValidationError>,
+        ) {
+            crate::models::validation::Validate::validate_into(
+                &self.body,
+                &path.field("body"),
+                errors,
+            );
+        }
+    }
+
     /// The responses of [`ResponsesApi::beta_compactconversation`], one per status the spec declares.
     #[cfg(feature = "responses")]
     #[derive(Clone, Debug)]
@@ -34984,6 +38601,9 @@ pub mod responses_api {
             Ok(request) => request,
             Err(error) => return api.invalid_request(error),
         };
+        if let Err(errors) = crate::models::validation::Validate::validate(&request) {
+            return api.invalid_request(super::RequestError::invalid(errors));
+        }
         match api.beta_compactconversation(request).await {
             Ok(response) => axum::response::IntoResponse::into_response(response),
             Err(error) => api.server_error(error),
@@ -35009,6 +38629,23 @@ pub mod responses_api {
         pub body: models::BetaCreateResponse,
         /// The request's headers, with its header and cookie parameters and credentials.
         pub headers: http::HeaderMap,
+    }
+
+    /// The spec's validation keywords of the parameters, at `path.<name>` and `query.<name>`, and of the body, at
+    /// `body`.
+    #[cfg(feature = "responses")]
+    impl crate::models::validation::Validate for BetaCreateResponseRequest {
+        fn validate_into(
+            &self,
+            path: &crate::models::validation::Path<'_>,
+            errors: &mut Vec<crate::models::validation::ValidationError>,
+        ) {
+            crate::models::validation::Validate::validate_into(
+                &self.body,
+                &path.field("body"),
+                errors,
+            );
+        }
     }
 
     /// The responses of [`ResponsesApi::beta_create_response`], one per status the spec declares.
@@ -35077,6 +38714,9 @@ pub mod responses_api {
             Ok(request) => request,
             Err(error) => return api.invalid_request(error),
         };
+        if let Err(errors) = crate::models::validation::Validate::validate(&request) {
+            return api.invalid_request(super::RequestError::invalid(errors));
+        }
         match api.beta_create_response(request).await {
             Ok(response) => axum::response::IntoResponse::into_response(response),
             Err(error) => api.server_error(error),
@@ -35304,6 +38944,23 @@ pub mod responses_api {
         pub headers: http::HeaderMap,
     }
 
+    /// The spec's validation keywords of the parameters, at `path.<name>` and `query.<name>`, and of the body, at
+    /// `body`.
+    #[cfg(feature = "responses")]
+    impl crate::models::validation::Validate for BetaGetinputtokencountsRequest {
+        fn validate_into(
+            &self,
+            path: &crate::models::validation::Path<'_>,
+            errors: &mut Vec<crate::models::validation::ValidationError>,
+        ) {
+            crate::models::validation::Validate::validate_into(
+                &self.body,
+                &path.field("body"),
+                errors,
+            );
+        }
+    }
+
     /// The responses of [`ResponsesApi::beta_getinputtokencounts`], one per status the spec declares.
     #[cfg(feature = "responses")]
     #[derive(Clone, Debug)]
@@ -35349,6 +39006,9 @@ pub mod responses_api {
             Ok(request) => request,
             Err(error) => return api.invalid_request(error),
         };
+        if let Err(errors) = crate::models::validation::Validate::validate(&request) {
+            return api.invalid_request(super::RequestError::invalid(errors));
+        }
         match api.beta_getinputtokencounts(request).await {
             Ok(response) => axum::response::IntoResponse::into_response(response),
             Err(error) => api.server_error(error),
@@ -35566,6 +39226,23 @@ pub mod responses_api {
         pub headers: http::HeaderMap,
     }
 
+    /// The spec's validation keywords of the parameters, at `path.<name>` and `query.<name>`, and of the body, at
+    /// `body`.
+    #[cfg(feature = "responses")]
+    impl crate::models::validation::Validate for CompactconversationRequest {
+        fn validate_into(
+            &self,
+            path: &crate::models::validation::Path<'_>,
+            errors: &mut Vec<crate::models::validation::ValidationError>,
+        ) {
+            crate::models::validation::Validate::validate_into(
+                &self.body,
+                &path.field("body"),
+                errors,
+            );
+        }
+    }
+
     /// The responses of [`ResponsesApi::compactconversation`], one per status the spec declares.
     #[cfg(feature = "responses")]
     #[derive(Clone, Debug)]
@@ -35619,6 +39296,9 @@ pub mod responses_api {
             Ok(request) => request,
             Err(error) => return api.invalid_request(error),
         };
+        if let Err(errors) = crate::models::validation::Validate::validate(&request) {
+            return api.invalid_request(super::RequestError::invalid(errors));
+        }
         match api.compactconversation(request).await {
             Ok(response) => axum::response::IntoResponse::into_response(response),
             Err(error) => api.server_error(error),
@@ -35644,6 +39324,23 @@ pub mod responses_api {
         pub body: models::CreateResponse,
         /// The request's headers, with its header and cookie parameters and credentials.
         pub headers: http::HeaderMap,
+    }
+
+    /// The spec's validation keywords of the parameters, at `path.<name>` and `query.<name>`, and of the body, at
+    /// `body`.
+    #[cfg(feature = "responses")]
+    impl crate::models::validation::Validate for CreateResponseRequest {
+        fn validate_into(
+            &self,
+            path: &crate::models::validation::Path<'_>,
+            errors: &mut Vec<crate::models::validation::ValidationError>,
+        ) {
+            crate::models::validation::Validate::validate_into(
+                &self.body,
+                &path.field("body"),
+                errors,
+            );
+        }
     }
 
     /// The responses of [`ResponsesApi::create_response`], one per status the spec declares.
@@ -35712,6 +39409,9 @@ pub mod responses_api {
             Ok(request) => request,
             Err(error) => return api.invalid_request(error),
         };
+        if let Err(errors) = crate::models::validation::Validate::validate(&request) {
+            return api.invalid_request(super::RequestError::invalid(errors));
+        }
         match api.create_response(request).await {
             Ok(response) => axum::response::IntoResponse::into_response(response),
             Err(error) => api.server_error(error),
@@ -35939,6 +39639,23 @@ pub mod responses_api {
         pub headers: http::HeaderMap,
     }
 
+    /// The spec's validation keywords of the parameters, at `path.<name>` and `query.<name>`, and of the body, at
+    /// `body`.
+    #[cfg(feature = "responses")]
+    impl crate::models::validation::Validate for GetinputtokencountsRequest {
+        fn validate_into(
+            &self,
+            path: &crate::models::validation::Path<'_>,
+            errors: &mut Vec<crate::models::validation::ValidationError>,
+        ) {
+            crate::models::validation::Validate::validate_into(
+                &self.body,
+                &path.field("body"),
+                errors,
+            );
+        }
+    }
+
     /// The responses of [`ResponsesApi::getinputtokencounts`], one per status the spec declares.
     #[cfg(feature = "responses")]
     #[derive(Clone, Debug)]
@@ -35984,6 +39701,9 @@ pub mod responses_api {
             Ok(request) => request,
             Err(error) => return api.invalid_request(error),
         };
+        if let Err(errors) = crate::models::validation::Validate::validate(&request) {
+            return api.invalid_request(super::RequestError::invalid(errors));
+        }
         match api.getinputtokencounts(request).await {
             Ok(response) => axum::response::IntoResponse::into_response(response),
             Err(error) => api.server_error(error),
@@ -36680,6 +40400,32 @@ pub mod roles_api {
         pub headers: http::HeaderMap,
     }
 
+    /// The spec's validation keywords of the parameters, at `path.<name>` and `query.<name>`, and of the body, at
+    /// `body`.
+    #[cfg(feature = "administration")]
+    impl crate::models::validation::Validate for ListProjectRolesRequest {
+        fn validate_into(
+            &self,
+            path: &crate::models::validation::Path<'_>,
+            errors: &mut Vec<crate::models::validation::ValidationError>,
+        ) {
+            if let Some(value0) = &self.limit {
+                crate::models::validation::minimum(
+                    *value0,
+                    0,
+                    &path.field("query").field("limit"),
+                    errors,
+                );
+                crate::models::validation::maximum(
+                    *value0,
+                    1000,
+                    &path.field("query").field("limit"),
+                    errors,
+                );
+            }
+        }
+    }
+
     /// The responses of [`RolesApi::list_project_roles`], one per status the spec declares.
     #[cfg(feature = "administration")]
     #[derive(Clone, Debug)]
@@ -36750,6 +40496,9 @@ pub mod roles_api {
             Ok(request) => request,
             Err(error) => return api.invalid_request(error),
         };
+        if let Err(errors) = crate::models::validation::Validate::validate(&request) {
+            return api.invalid_request(super::RequestError::invalid(errors));
+        }
         match api.list_project_roles(request).await {
             Ok(response) => axum::response::IntoResponse::into_response(response),
             Err(error) => api.server_error(error),
@@ -36783,6 +40532,32 @@ pub mod roles_api {
         pub order: Option<String>,
         /// The request's headers, with its header and cookie parameters and credentials.
         pub headers: http::HeaderMap,
+    }
+
+    /// The spec's validation keywords of the parameters, at `path.<name>` and `query.<name>`, and of the body, at
+    /// `body`.
+    #[cfg(feature = "administration")]
+    impl crate::models::validation::Validate for ListRolesRequest {
+        fn validate_into(
+            &self,
+            path: &crate::models::validation::Path<'_>,
+            errors: &mut Vec<crate::models::validation::ValidationError>,
+        ) {
+            if let Some(value0) = &self.limit {
+                crate::models::validation::minimum(
+                    *value0,
+                    0,
+                    &path.field("query").field("limit"),
+                    errors,
+                );
+                crate::models::validation::maximum(
+                    *value0,
+                    1000,
+                    &path.field("query").field("limit"),
+                    errors,
+                );
+            }
+        }
     }
 
     /// The responses of [`RolesApi::list_roles`], one per status the spec declares.
@@ -36841,6 +40616,9 @@ pub mod roles_api {
             Ok(request) => request,
             Err(error) => return api.invalid_request(error),
         };
+        if let Err(errors) = crate::models::validation::Validate::validate(&request) {
+            return api.invalid_request(super::RequestError::invalid(errors));
+        }
         match api.list_roles(request).await {
             Ok(response) => axum::response::IntoResponse::into_response(response),
             Err(error) => api.server_error(error),
@@ -37451,6 +41229,23 @@ pub mod skills_api {
         pub headers: http::HeaderMap,
     }
 
+    /// The spec's validation keywords of the parameters, at `path.<name>` and `query.<name>`, and of the body, at
+    /// `body`.
+    #[cfg(feature = "skill")]
+    impl crate::models::validation::Validate for CreateSkillRequest {
+        fn validate_into(
+            &self,
+            path: &crate::models::validation::Path<'_>,
+            errors: &mut Vec<crate::models::validation::ValidationError>,
+        ) {
+            crate::models::validation::Validate::validate_into(
+                &self.body,
+                &path.field("body"),
+                errors,
+            );
+        }
+    }
+
     /// The request body of [`SkillsApi::create_skill`], one of the media types the spec gives it: a variant per kind,
     /// chosen by the request's `Content-Type`.
     #[cfg(feature = "skill")]
@@ -37460,6 +41255,19 @@ pub mod skills_api {
         Multipart(CreateSkillForm),
         /// `application/json`
         Json(models::CreateSkillBody),
+    }
+
+    #[cfg(feature = "skill")]
+    impl crate::models::validation::Validate for CreateSkillBody {
+        fn validate_into(
+            &self,
+            path: &crate::models::validation::Path<'_>,
+            errors: &mut Vec<crate::models::validation::ValidationError>,
+        ) {
+            if let CreateSkillBody::Json(value) = self {
+                crate::models::validation::Validate::validate_into(value, path, errors);
+            }
+        }
     }
 
     #[cfg(feature = "skill")]
@@ -37596,6 +41404,9 @@ pub mod skills_api {
             Ok(request) => request,
             Err(error) => return api.invalid_request(error),
         };
+        if let Err(errors) = crate::models::validation::Validate::validate(&request) {
+            return api.invalid_request(super::RequestError::invalid(errors));
+        }
         match api.create_skill(request).await {
             Ok(response) => axum::response::IntoResponse::into_response(response),
             Err(error) => api.server_error(error),
@@ -37622,6 +41433,23 @@ pub mod skills_api {
         pub headers: http::HeaderMap,
     }
 
+    /// The spec's validation keywords of the parameters, at `path.<name>` and `query.<name>`, and of the body, at
+    /// `body`.
+    #[cfg(feature = "skill")]
+    impl crate::models::validation::Validate for CreateSkillVersionRequest {
+        fn validate_into(
+            &self,
+            path: &crate::models::validation::Path<'_>,
+            errors: &mut Vec<crate::models::validation::ValidationError>,
+        ) {
+            crate::models::validation::Validate::validate_into(
+                &self.body,
+                &path.field("body"),
+                errors,
+            );
+        }
+    }
+
     /// The request body of [`SkillsApi::create_skill_version`], one of the media types the spec gives it: a variant per kind,
     /// chosen by the request's `Content-Type`.
     #[cfg(feature = "skill")]
@@ -37631,6 +41459,19 @@ pub mod skills_api {
         Multipart(CreateSkillVersionForm),
         /// `application/json`
         Json(models::CreateSkillVersionBody),
+    }
+
+    #[cfg(feature = "skill")]
+    impl crate::models::validation::Validate for CreateSkillVersionBody {
+        fn validate_into(
+            &self,
+            path: &crate::models::validation::Path<'_>,
+            errors: &mut Vec<crate::models::validation::ValidationError>,
+        ) {
+            if let CreateSkillVersionBody::Json(value) = self {
+                crate::models::validation::Validate::validate_into(value, path, errors);
+            }
+        }
     }
 
     #[cfg(feature = "skill")]
@@ -37793,6 +41634,9 @@ pub mod skills_api {
             Ok(request) => request,
             Err(error) => return api.invalid_request(error),
         };
+        if let Err(errors) = crate::models::validation::Validate::validate(&request) {
+            return api.invalid_request(super::RequestError::invalid(errors));
+        }
         match api.create_skill_version(request).await {
             Ok(response) => axum::response::IntoResponse::into_response(response),
             Err(error) => api.server_error(error),
@@ -38378,6 +42222,32 @@ pub mod skills_api {
         pub headers: http::HeaderMap,
     }
 
+    /// The spec's validation keywords of the parameters, at `path.<name>` and `query.<name>`, and of the body, at
+    /// `body`.
+    #[cfg(feature = "skill")]
+    impl crate::models::validation::Validate for ListSkillVersionsRequest {
+        fn validate_into(
+            &self,
+            path: &crate::models::validation::Path<'_>,
+            errors: &mut Vec<crate::models::validation::ValidationError>,
+        ) {
+            if let Some(value0) = &self.limit {
+                crate::models::validation::minimum(
+                    *value0,
+                    0,
+                    &path.field("query").field("limit"),
+                    errors,
+                );
+                crate::models::validation::maximum(
+                    *value0,
+                    100,
+                    &path.field("query").field("limit"),
+                    errors,
+                );
+            }
+        }
+    }
+
     /// The responses of [`SkillsApi::list_skill_versions`], one per status the spec declares.
     #[cfg(feature = "skill")]
     #[derive(Clone, Debug)]
@@ -38443,6 +42313,9 @@ pub mod skills_api {
             Ok(request) => request,
             Err(error) => return api.invalid_request(error),
         };
+        if let Err(errors) = crate::models::validation::Validate::validate(&request) {
+            return api.invalid_request(super::RequestError::invalid(errors));
+        }
         match api.list_skill_versions(request).await {
             Ok(response) => axum::response::IntoResponse::into_response(response),
             Err(error) => api.server_error(error),
@@ -38479,6 +42352,32 @@ pub mod skills_api {
         pub after: Option<String>,
         /// The request's headers, with its header and cookie parameters and credentials.
         pub headers: http::HeaderMap,
+    }
+
+    /// The spec's validation keywords of the parameters, at `path.<name>` and `query.<name>`, and of the body, at
+    /// `body`.
+    #[cfg(feature = "skill")]
+    impl crate::models::validation::Validate for ListSkillsRequest {
+        fn validate_into(
+            &self,
+            path: &crate::models::validation::Path<'_>,
+            errors: &mut Vec<crate::models::validation::ValidationError>,
+        ) {
+            if let Some(value0) = &self.limit {
+                crate::models::validation::minimum(
+                    *value0,
+                    0,
+                    &path.field("query").field("limit"),
+                    errors,
+                );
+                crate::models::validation::maximum(
+                    *value0,
+                    100,
+                    &path.field("query").field("limit"),
+                    errors,
+                );
+            }
+        }
     }
 
     /// The responses of [`SkillsApi::list_skills`], one per status the spec declares.
@@ -38527,6 +42426,9 @@ pub mod skills_api {
             Ok(request) => request,
             Err(error) => return api.invalid_request(error),
         };
+        if let Err(errors) = crate::models::validation::Validate::validate(&request) {
+            return api.invalid_request(super::RequestError::invalid(errors));
+        }
         match api.list_skills(request).await {
             Ok(response) => axum::response::IntoResponse::into_response(response),
             Err(error) => api.server_error(error),
@@ -38857,6 +42759,23 @@ pub mod spend_alerts_api {
         pub headers: http::HeaderMap,
     }
 
+    /// The spec's validation keywords of the parameters, at `path.<name>` and `query.<name>`, and of the body, at
+    /// `body`.
+    #[cfg(feature = "administration")]
+    impl crate::models::validation::Validate for CreateOrganizationSpendAlertRequest {
+        fn validate_into(
+            &self,
+            path: &crate::models::validation::Path<'_>,
+            errors: &mut Vec<crate::models::validation::ValidationError>,
+        ) {
+            crate::models::validation::Validate::validate_into(
+                &self.body,
+                &path.field("body"),
+                errors,
+            );
+        }
+    }
+
     /// The responses of [`SpendAlertsApi::create_organization_spend_alert`], one per status the spec declares.
     #[cfg(feature = "administration")]
     #[derive(Clone, Debug)]
@@ -38899,6 +42818,9 @@ pub mod spend_alerts_api {
             Ok(request) => request,
             Err(error) => return api.invalid_request(error),
         };
+        if let Err(errors) = crate::models::validation::Validate::validate(&request) {
+            return api.invalid_request(super::RequestError::invalid(errors));
+        }
         match api.create_organization_spend_alert(request).await {
             Ok(response) => axum::response::IntoResponse::into_response(response),
             Err(error) => api.server_error(error),
@@ -38926,6 +42848,23 @@ pub mod spend_alerts_api {
         pub body: models::CreateSpendAlertBody,
         /// The request's headers, with its header and cookie parameters and credentials.
         pub headers: http::HeaderMap,
+    }
+
+    /// The spec's validation keywords of the parameters, at `path.<name>` and `query.<name>`, and of the body, at
+    /// `body`.
+    #[cfg(feature = "administration")]
+    impl crate::models::validation::Validate for CreateProjectSpendAlertRequest {
+        fn validate_into(
+            &self,
+            path: &crate::models::validation::Path<'_>,
+            errors: &mut Vec<crate::models::validation::ValidationError>,
+        ) {
+            crate::models::validation::Validate::validate_into(
+                &self.body,
+                &path.field("body"),
+                errors,
+            );
+        }
     }
 
     /// The responses of [`SpendAlertsApi::create_project_spend_alert`], one per status the spec declares.
@@ -38989,6 +42928,9 @@ pub mod spend_alerts_api {
             Ok(request) => request,
             Err(error) => return api.invalid_request(error),
         };
+        if let Err(errors) = crate::models::validation::Validate::validate(&request) {
+            return api.invalid_request(super::RequestError::invalid(errors));
+        }
         match api.create_project_spend_alert(request).await {
             Ok(response) => axum::response::IntoResponse::into_response(response),
             Err(error) => api.server_error(error),
@@ -39196,6 +43138,32 @@ pub mod spend_alerts_api {
         pub headers: http::HeaderMap,
     }
 
+    /// The spec's validation keywords of the parameters, at `path.<name>` and `query.<name>`, and of the body, at
+    /// `body`.
+    #[cfg(feature = "administration")]
+    impl crate::models::validation::Validate for ListOrganizationSpendAlertsRequest {
+        fn validate_into(
+            &self,
+            path: &crate::models::validation::Path<'_>,
+            errors: &mut Vec<crate::models::validation::ValidationError>,
+        ) {
+            if let Some(value0) = &self.limit {
+                crate::models::validation::minimum(
+                    *value0,
+                    0,
+                    &path.field("query").field("limit"),
+                    errors,
+                );
+                crate::models::validation::maximum(
+                    *value0,
+                    100,
+                    &path.field("query").field("limit"),
+                    errors,
+                );
+            }
+        }
+    }
+
     /// The responses of [`SpendAlertsApi::list_organization_spend_alerts`], one per status the spec declares.
     #[cfg(feature = "administration")]
     #[derive(Clone, Debug)]
@@ -39244,6 +43212,9 @@ pub mod spend_alerts_api {
             Ok(request) => request,
             Err(error) => return api.invalid_request(error),
         };
+        if let Err(errors) = crate::models::validation::Validate::validate(&request) {
+            return api.invalid_request(super::RequestError::invalid(errors));
+        }
         match api.list_organization_spend_alerts(request).await {
             Ok(response) => axum::response::IntoResponse::into_response(response),
             Err(error) => api.server_error(error),
@@ -39280,6 +43251,32 @@ pub mod spend_alerts_api {
         pub before: Option<String>,
         /// The request's headers, with its header and cookie parameters and credentials.
         pub headers: http::HeaderMap,
+    }
+
+    /// The spec's validation keywords of the parameters, at `path.<name>` and `query.<name>`, and of the body, at
+    /// `body`.
+    #[cfg(feature = "administration")]
+    impl crate::models::validation::Validate for ListProjectSpendAlertsRequest {
+        fn validate_into(
+            &self,
+            path: &crate::models::validation::Path<'_>,
+            errors: &mut Vec<crate::models::validation::ValidationError>,
+        ) {
+            if let Some(value0) = &self.limit {
+                crate::models::validation::minimum(
+                    *value0,
+                    0,
+                    &path.field("query").field("limit"),
+                    errors,
+                );
+                crate::models::validation::maximum(
+                    *value0,
+                    100,
+                    &path.field("query").field("limit"),
+                    errors,
+                );
+            }
+        }
     }
 
     /// The responses of [`SpendAlertsApi::list_project_spend_alerts`], one per status the spec declares.
@@ -39344,6 +43341,9 @@ pub mod spend_alerts_api {
             Ok(request) => request,
             Err(error) => return api.invalid_request(error),
         };
+        if let Err(errors) = crate::models::validation::Validate::validate(&request) {
+            return api.invalid_request(super::RequestError::invalid(errors));
+        }
         match api.list_project_spend_alerts(request).await {
             Ok(response) => axum::response::IntoResponse::into_response(response),
             Err(error) => api.server_error(error),
@@ -39550,6 +43550,23 @@ pub mod spend_alerts_api {
         pub headers: http::HeaderMap,
     }
 
+    /// The spec's validation keywords of the parameters, at `path.<name>` and `query.<name>`, and of the body, at
+    /// `body`.
+    #[cfg(feature = "administration")]
+    impl crate::models::validation::Validate for UpdateOrganizationSpendAlertRequest {
+        fn validate_into(
+            &self,
+            path: &crate::models::validation::Path<'_>,
+            errors: &mut Vec<crate::models::validation::ValidationError>,
+        ) {
+            crate::models::validation::Validate::validate_into(
+                &self.body,
+                &path.field("body"),
+                errors,
+            );
+        }
+    }
+
     /// The responses of [`SpendAlertsApi::update_organization_spend_alert`], one per status the spec declares.
     #[cfg(feature = "administration")]
     #[derive(Clone, Debug)]
@@ -39611,6 +43628,9 @@ pub mod spend_alerts_api {
             Ok(request) => request,
             Err(error) => return api.invalid_request(error),
         };
+        if let Err(errors) = crate::models::validation::Validate::validate(&request) {
+            return api.invalid_request(super::RequestError::invalid(errors));
+        }
         match api.update_organization_spend_alert(request).await {
             Ok(response) => axum::response::IntoResponse::into_response(response),
             Err(error) => api.server_error(error),
@@ -39642,6 +43662,23 @@ pub mod spend_alerts_api {
         pub body: models::CreateSpendAlertBody,
         /// The request's headers, with its header and cookie parameters and credentials.
         pub headers: http::HeaderMap,
+    }
+
+    /// The spec's validation keywords of the parameters, at `path.<name>` and `query.<name>`, and of the body, at
+    /// `body`.
+    #[cfg(feature = "administration")]
+    impl crate::models::validation::Validate for UpdateProjectSpendAlertRequest {
+        fn validate_into(
+            &self,
+            path: &crate::models::validation::Path<'_>,
+            errors: &mut Vec<crate::models::validation::ValidationError>,
+        ) {
+            crate::models::validation::Validate::validate_into(
+                &self.body,
+                &path.field("body"),
+                errors,
+            );
+        }
     }
 
     /// The responses of [`SpendAlertsApi::update_project_spend_alert`], one per status the spec declares.
@@ -39705,6 +43742,9 @@ pub mod spend_alerts_api {
             Ok(request) => request,
             Err(error) => return api.invalid_request(error),
         };
+        if let Err(errors) = crate::models::validation::Validate::validate(&request) {
+            return api.invalid_request(super::RequestError::invalid(errors));
+        }
         match api.update_project_spend_alert(request).await {
             Ok(response) => axum::response::IntoResponse::into_response(response),
             Err(error) => api.server_error(error),
@@ -40133,6 +44173,23 @@ pub mod uploads_api {
         pub headers: http::HeaderMap,
     }
 
+    /// The spec's validation keywords of the parameters, at `path.<name>` and `query.<name>`, and of the body, at
+    /// `body`.
+    #[cfg(feature = "upload")]
+    impl crate::models::validation::Validate for CreateUploadRequest {
+        fn validate_into(
+            &self,
+            path: &crate::models::validation::Path<'_>,
+            errors: &mut Vec<crate::models::validation::ValidationError>,
+        ) {
+            crate::models::validation::Validate::validate_into(
+                &self.body,
+                &path.field("body"),
+                errors,
+            );
+        }
+    }
+
     /// The responses of [`UploadsApi::create_upload`], one per status the spec declares.
     #[cfg(feature = "upload")]
     #[derive(Clone, Debug)]
@@ -40175,6 +44232,9 @@ pub mod uploads_api {
             Ok(request) => request,
             Err(error) => return api.invalid_request(error),
         };
+        if let Err(errors) = crate::models::validation::Validate::validate(&request) {
+            return api.invalid_request(super::RequestError::invalid(errors));
+        }
         match api.create_upload(request).await {
             Ok(response) => axum::response::IntoResponse::into_response(response),
             Err(error) => api.server_error(error),
@@ -41799,6 +45859,32 @@ pub mod user_organization_role_assignments_api {
         pub headers: http::HeaderMap,
     }
 
+    /// The spec's validation keywords of the parameters, at `path.<name>` and `query.<name>`, and of the body, at
+    /// `body`.
+    #[cfg(feature = "administration")]
+    impl crate::models::validation::Validate for ListUserRoleAssignmentsRequest {
+        fn validate_into(
+            &self,
+            path: &crate::models::validation::Path<'_>,
+            errors: &mut Vec<crate::models::validation::ValidationError>,
+        ) {
+            if let Some(value0) = &self.limit {
+                crate::models::validation::minimum(
+                    *value0,
+                    0,
+                    &path.field("query").field("limit"),
+                    errors,
+                );
+                crate::models::validation::maximum(
+                    *value0,
+                    1000,
+                    &path.field("query").field("limit"),
+                    errors,
+                );
+            }
+        }
+    }
+
     /// The responses of [`UserOrganizationRoleAssignmentsApi::list_user_role_assignments`], one per status the spec declares.
     #[cfg(feature = "administration")]
     #[derive(Clone, Debug)]
@@ -41869,6 +45955,9 @@ pub mod user_organization_role_assignments_api {
             Ok(request) => request,
             Err(error) => return api.invalid_request(error),
         };
+        if let Err(errors) = crate::models::validation::Validate::validate(&request) {
+            return api.invalid_request(super::RequestError::invalid(errors));
+        }
         match api.list_user_role_assignments(request).await {
             Ok(response) => axum::response::IntoResponse::into_response(response),
             Err(error) => api.server_error(error),
@@ -42718,6 +46807,23 @@ pub mod vaults_api {
         pub headers: http::HeaderMap,
     }
 
+    /// The spec's validation keywords of the parameters, at `path.<name>` and `query.<name>`, and of the body, at
+    /// `body`.
+    #[cfg(feature = "vaults")]
+    impl crate::models::validation::Validate for CreateVaultRequest {
+        fn validate_into(
+            &self,
+            path: &crate::models::validation::Path<'_>,
+            errors: &mut Vec<crate::models::validation::ValidationError>,
+        ) {
+            crate::models::validation::Validate::validate_into(
+                &self.body,
+                &path.field("body"),
+                errors,
+            );
+        }
+    }
+
     /// The responses of [`VaultsApi::create_vault`], one per status the spec declares.
     #[cfg(feature = "vaults")]
     #[derive(Clone, Debug)]
@@ -42785,6 +46891,9 @@ pub mod vaults_api {
             Ok(request) => request,
             Err(error) => return api.invalid_request(error),
         };
+        if let Err(errors) = crate::models::validation::Validate::validate(&request) {
+            return api.invalid_request(super::RequestError::invalid(errors));
+        }
         match api.create_vault(request).await {
             Ok(response) => axum::response::IntoResponse::into_response(response),
             Err(error) => api.server_error(error),
@@ -42812,6 +46921,30 @@ pub mod vaults_api {
         pub body: Option<models::CreateVaultCredentialParams>,
         /// The request's headers, with its header and cookie parameters and credentials.
         pub headers: http::HeaderMap,
+    }
+
+    /// The spec's validation keywords of the parameters, at `path.<name>` and `query.<name>`, and of the body, at
+    /// `body`.
+    #[cfg(feature = "vaults")]
+    impl crate::models::validation::Validate for CreateVaultCredentialRequest {
+        fn validate_into(
+            &self,
+            path: &crate::models::validation::Path<'_>,
+            errors: &mut Vec<crate::models::validation::ValidationError>,
+        ) {
+            crate::models::validation::length(
+                &self.vault_id,
+                Some(0),
+                Some(1048576),
+                &path.field("path").field("vault_id"),
+                errors,
+            );
+            crate::models::validation::Validate::validate_into(
+                &self.body,
+                &path.field("body"),
+                errors,
+            );
+        }
     }
 
     /// The responses of [`VaultsApi::create_vault_credential`], one per status the spec declares.
@@ -42895,6 +47028,9 @@ pub mod vaults_api {
             Ok(request) => request,
             Err(error) => return api.invalid_request(error),
         };
+        if let Err(errors) = crate::models::validation::Validate::validate(&request) {
+            return api.invalid_request(super::RequestError::invalid(errors));
+        }
         match api.create_vault_credential(request).await {
             Ok(response) => axum::response::IntoResponse::into_response(response),
             Err(error) => api.server_error(error),
@@ -42922,6 +47058,25 @@ pub mod vaults_api {
         pub vault_id: String,
         /// The request's headers, with its header and cookie parameters and credentials.
         pub headers: http::HeaderMap,
+    }
+
+    /// The spec's validation keywords of the parameters, at `path.<name>` and `query.<name>`, and of the body, at
+    /// `body`.
+    #[cfg(feature = "vaults")]
+    impl crate::models::validation::Validate for DeleteVaultRequest {
+        fn validate_into(
+            &self,
+            path: &crate::models::validation::Path<'_>,
+            errors: &mut Vec<crate::models::validation::ValidationError>,
+        ) {
+            crate::models::validation::length(
+                &self.vault_id,
+                Some(0),
+                Some(1048576),
+                &path.field("path").field("vault_id"),
+                errors,
+            );
+        }
     }
 
     /// The responses of [`VaultsApi::delete_vault`], one per status the spec declares.
@@ -43004,6 +47159,9 @@ pub mod vaults_api {
             Ok(request) => request,
             Err(error) => return api.invalid_request(error),
         };
+        if let Err(errors) = crate::models::validation::Validate::validate(&request) {
+            return api.invalid_request(super::RequestError::invalid(errors));
+        }
         match api.delete_vault(request).await {
             Ok(response) => axum::response::IntoResponse::into_response(response),
             Err(error) => api.server_error(error),
@@ -43031,6 +47189,32 @@ pub mod vaults_api {
         pub credential_id: String,
         /// The request's headers, with its header and cookie parameters and credentials.
         pub headers: http::HeaderMap,
+    }
+
+    /// The spec's validation keywords of the parameters, at `path.<name>` and `query.<name>`, and of the body, at
+    /// `body`.
+    #[cfg(feature = "vaults")]
+    impl crate::models::validation::Validate for DeleteVaultCredentialRequest {
+        fn validate_into(
+            &self,
+            path: &crate::models::validation::Path<'_>,
+            errors: &mut Vec<crate::models::validation::ValidationError>,
+        ) {
+            crate::models::validation::length(
+                &self.vault_id,
+                Some(0),
+                Some(1048576),
+                &path.field("path").field("vault_id"),
+                errors,
+            );
+            crate::models::validation::length(
+                &self.credential_id,
+                Some(0),
+                Some(1048576),
+                &path.field("path").field("credential_id"),
+                errors,
+            );
+        }
     }
 
     /// The responses of [`VaultsApi::delete_vault_credential`], one per status the spec declares.
@@ -43113,6 +47297,9 @@ pub mod vaults_api {
             Ok(request) => request,
             Err(error) => return api.invalid_request(error),
         };
+        if let Err(errors) = crate::models::validation::Validate::validate(&request) {
+            return api.invalid_request(super::RequestError::invalid(errors));
+        }
         match api.delete_vault_credential(request).await {
             Ok(response) => axum::response::IntoResponse::into_response(response),
             Err(error) => api.server_error(error),
@@ -43149,6 +47336,53 @@ pub mod vaults_api {
         pub status: Option<models::VaultStatusFilterParam>,
         /// The request's headers, with its header and cookie parameters and credentials.
         pub headers: http::HeaderMap,
+    }
+
+    /// The spec's validation keywords of the parameters, at `path.<name>` and `query.<name>`, and of the body, at
+    /// `body`.
+    #[cfg(feature = "vaults")]
+    impl crate::models::validation::Validate for ListVaultCredentialsRequest {
+        fn validate_into(
+            &self,
+            path: &crate::models::validation::Path<'_>,
+            errors: &mut Vec<crate::models::validation::ValidationError>,
+        ) {
+            crate::models::validation::length(
+                &self.vault_id,
+                Some(0),
+                Some(1048576),
+                &path.field("path").field("vault_id"),
+                errors,
+            );
+            if let Some(value0) = &self.limit {
+                crate::models::validation::minimum(
+                    *value0,
+                    1,
+                    &path.field("query").field("limit"),
+                    errors,
+                );
+                crate::models::validation::maximum(
+                    *value0,
+                    100,
+                    &path.field("query").field("limit"),
+                    errors,
+                );
+            }
+            if let Some(value0) = &self.after {
+                crate::models::validation::length(
+                    value0,
+                    Some(0),
+                    Some(1048576),
+                    &path.field("query").field("after"),
+                    errors,
+                );
+            }
+            crate::models::validation::Validate::validate_into(
+                &self.status,
+                &path.field("query").field("status"),
+                errors,
+            );
+        }
     }
 
     /// The responses of [`VaultsApi::list_vault_credentials`], one per status the spec declares.
@@ -43233,6 +47467,9 @@ pub mod vaults_api {
             Ok(request) => request,
             Err(error) => return api.invalid_request(error),
         };
+        if let Err(errors) = crate::models::validation::Validate::validate(&request) {
+            return api.invalid_request(super::RequestError::invalid(errors));
+        }
         match api.list_vault_credentials(request).await {
             Ok(response) => axum::response::IntoResponse::into_response(response),
             Err(error) => api.server_error(error),
@@ -43283,6 +47520,46 @@ pub mod vaults_api {
         pub status: Option<models::VaultStatusFilterParam>,
         /// The request's headers, with its header and cookie parameters and credentials.
         pub headers: http::HeaderMap,
+    }
+
+    /// The spec's validation keywords of the parameters, at `path.<name>` and `query.<name>`, and of the body, at
+    /// `body`.
+    #[cfg(feature = "vaults")]
+    impl crate::models::validation::Validate for ListVaultsRequest {
+        fn validate_into(
+            &self,
+            path: &crate::models::validation::Path<'_>,
+            errors: &mut Vec<crate::models::validation::ValidationError>,
+        ) {
+            if let Some(value0) = &self.limit {
+                crate::models::validation::minimum(
+                    *value0,
+                    1,
+                    &path.field("query").field("limit"),
+                    errors,
+                );
+                crate::models::validation::maximum(
+                    *value0,
+                    100,
+                    &path.field("query").field("limit"),
+                    errors,
+                );
+            }
+            if let Some(value0) = &self.after {
+                crate::models::validation::length(
+                    value0,
+                    Some(0),
+                    Some(1048576),
+                    &path.field("query").field("after"),
+                    errors,
+                );
+            }
+            crate::models::validation::Validate::validate_into(
+                &self.status,
+                &path.field("query").field("status"),
+                errors,
+            );
+        }
     }
 
     /// The responses of [`VaultsApi::list_vaults`], one per status the spec declares.
@@ -43353,6 +47630,9 @@ pub mod vaults_api {
             Ok(request) => request,
             Err(error) => return api.invalid_request(error),
         };
+        if let Err(errors) = crate::models::validation::Validate::validate(&request) {
+            return api.invalid_request(super::RequestError::invalid(errors));
+        }
         match api.list_vaults(request).await {
             Ok(response) => axum::response::IntoResponse::into_response(response),
             Err(error) => api.server_error(error),
@@ -43393,6 +47673,25 @@ pub mod vaults_api {
         pub vault_id: String,
         /// The request's headers, with its header and cookie parameters and credentials.
         pub headers: http::HeaderMap,
+    }
+
+    /// The spec's validation keywords of the parameters, at `path.<name>` and `query.<name>`, and of the body, at
+    /// `body`.
+    #[cfg(feature = "vaults")]
+    impl crate::models::validation::Validate for RetrieveVaultRequest {
+        fn validate_into(
+            &self,
+            path: &crate::models::validation::Path<'_>,
+            errors: &mut Vec<crate::models::validation::ValidationError>,
+        ) {
+            crate::models::validation::length(
+                &self.vault_id,
+                Some(0),
+                Some(1048576),
+                &path.field("path").field("vault_id"),
+                errors,
+            );
+        }
     }
 
     /// The responses of [`VaultsApi::retrieve_vault`], one per status the spec declares.
@@ -43475,6 +47774,9 @@ pub mod vaults_api {
             Ok(request) => request,
             Err(error) => return api.invalid_request(error),
         };
+        if let Err(errors) = crate::models::validation::Validate::validate(&request) {
+            return api.invalid_request(super::RequestError::invalid(errors));
+        }
         match api.retrieve_vault(request).await {
             Ok(response) => axum::response::IntoResponse::into_response(response),
             Err(error) => api.server_error(error),
@@ -43502,6 +47804,32 @@ pub mod vaults_api {
         pub credential_id: String,
         /// The request's headers, with its header and cookie parameters and credentials.
         pub headers: http::HeaderMap,
+    }
+
+    /// The spec's validation keywords of the parameters, at `path.<name>` and `query.<name>`, and of the body, at
+    /// `body`.
+    #[cfg(feature = "vaults")]
+    impl crate::models::validation::Validate for RetrieveVaultCredentialRequest {
+        fn validate_into(
+            &self,
+            path: &crate::models::validation::Path<'_>,
+            errors: &mut Vec<crate::models::validation::ValidationError>,
+        ) {
+            crate::models::validation::length(
+                &self.vault_id,
+                Some(0),
+                Some(1048576),
+                &path.field("path").field("vault_id"),
+                errors,
+            );
+            crate::models::validation::length(
+                &self.credential_id,
+                Some(0),
+                Some(1048576),
+                &path.field("path").field("credential_id"),
+                errors,
+            );
+        }
     }
 
     /// The responses of [`VaultsApi::retrieve_vault_credential`], one per status the spec declares.
@@ -43584,6 +47912,9 @@ pub mod vaults_api {
             Ok(request) => request,
             Err(error) => return api.invalid_request(error),
         };
+        if let Err(errors) = crate::models::validation::Validate::validate(&request) {
+            return api.invalid_request(super::RequestError::invalid(errors));
+        }
         match api.retrieve_vault_credential(request).await {
             Ok(response) => axum::response::IntoResponse::into_response(response),
             Err(error) => api.server_error(error),
@@ -43614,6 +47945,37 @@ pub mod vaults_api {
         pub body: models::RotateVaultCredentialParams,
         /// The request's headers, with its header and cookie parameters and credentials.
         pub headers: http::HeaderMap,
+    }
+
+    /// The spec's validation keywords of the parameters, at `path.<name>` and `query.<name>`, and of the body, at
+    /// `body`.
+    #[cfg(feature = "vaults")]
+    impl crate::models::validation::Validate for RotateVaultCredentialRequest {
+        fn validate_into(
+            &self,
+            path: &crate::models::validation::Path<'_>,
+            errors: &mut Vec<crate::models::validation::ValidationError>,
+        ) {
+            crate::models::validation::length(
+                &self.vault_id,
+                Some(0),
+                Some(1048576),
+                &path.field("path").field("vault_id"),
+                errors,
+            );
+            crate::models::validation::length(
+                &self.credential_id,
+                Some(0),
+                Some(1048576),
+                &path.field("path").field("credential_id"),
+                errors,
+            );
+            crate::models::validation::Validate::validate_into(
+                &self.body,
+                &path.field("body"),
+                errors,
+            );
+        }
     }
 
     /// The responses of [`VaultsApi::rotate_vault_credential`], one per status the spec declares.
@@ -43697,6 +48059,9 @@ pub mod vaults_api {
             Ok(request) => request,
             Err(error) => return api.invalid_request(error),
         };
+        if let Err(errors) = crate::models::validation::Validate::validate(&request) {
+            return api.invalid_request(super::RequestError::invalid(errors));
+        }
         match api.rotate_vault_credential(request).await {
             Ok(response) => axum::response::IntoResponse::into_response(response),
             Err(error) => api.server_error(error),
@@ -43727,6 +48092,30 @@ pub mod vaults_api {
         pub body: models::UpdateVaultParams,
         /// The request's headers, with its header and cookie parameters and credentials.
         pub headers: http::HeaderMap,
+    }
+
+    /// The spec's validation keywords of the parameters, at `path.<name>` and `query.<name>`, and of the body, at
+    /// `body`.
+    #[cfg(feature = "vaults")]
+    impl crate::models::validation::Validate for UpdateVaultRequest {
+        fn validate_into(
+            &self,
+            path: &crate::models::validation::Path<'_>,
+            errors: &mut Vec<crate::models::validation::ValidationError>,
+        ) {
+            crate::models::validation::length(
+                &self.vault_id,
+                Some(0),
+                Some(1048576),
+                &path.field("path").field("vault_id"),
+                errors,
+            );
+            crate::models::validation::Validate::validate_into(
+                &self.body,
+                &path.field("body"),
+                errors,
+            );
+        }
     }
 
     /// The responses of [`VaultsApi::update_vault`], one per status the spec declares.
@@ -43810,6 +48199,9 @@ pub mod vaults_api {
             Ok(request) => request,
             Err(error) => return api.invalid_request(error),
         };
+        if let Err(errors) = crate::models::validation::Validate::validate(&request) {
+            return api.invalid_request(super::RequestError::invalid(errors));
+        }
         match api.update_vault(request).await {
             Ok(response) => axum::response::IntoResponse::into_response(response),
             Err(error) => api.server_error(error),
@@ -44244,6 +48636,23 @@ pub mod vector_stores_api {
         pub headers: http::HeaderMap,
     }
 
+    /// The spec's validation keywords of the parameters, at `path.<name>` and `query.<name>`, and of the body, at
+    /// `body`.
+    #[cfg(feature = "vectorstore")]
+    impl crate::models::validation::Validate for CreateVectorStoreRequest {
+        fn validate_into(
+            &self,
+            path: &crate::models::validation::Path<'_>,
+            errors: &mut Vec<crate::models::validation::ValidationError>,
+        ) {
+            crate::models::validation::Validate::validate_into(
+                &self.body,
+                &path.field("body"),
+                errors,
+            );
+        }
+    }
+
     /// The responses of [`VectorStoresApi::create_vector_store`], one per status the spec declares.
     #[cfg(feature = "vectorstore")]
     #[derive(Clone, Debug)]
@@ -44294,6 +48703,9 @@ pub mod vector_stores_api {
             Ok(request) => request,
             Err(error) => return api.invalid_request(error),
         };
+        if let Err(errors) = crate::models::validation::Validate::validate(&request) {
+            return api.invalid_request(super::RequestError::invalid(errors));
+        }
         match api.create_vector_store(request).await {
             Ok(response) => axum::response::IntoResponse::into_response(response),
             Err(error) => api.server_error(error),
@@ -44321,6 +48733,23 @@ pub mod vector_stores_api {
         pub body: models::CreateVectorStoreFileRequest,
         /// The request's headers, with its header and cookie parameters and credentials.
         pub headers: http::HeaderMap,
+    }
+
+    /// The spec's validation keywords of the parameters, at `path.<name>` and `query.<name>`, and of the body, at
+    /// `body`.
+    #[cfg(feature = "vectorstore")]
+    impl crate::models::validation::Validate for CreateVectorStoreFileRequest {
+        fn validate_into(
+            &self,
+            path: &crate::models::validation::Path<'_>,
+            errors: &mut Vec<crate::models::validation::ValidationError>,
+        ) {
+            crate::models::validation::Validate::validate_into(
+                &self.body,
+                &path.field("body"),
+                errors,
+            );
+        }
     }
 
     /// The responses of [`VectorStoresApi::create_vector_store_file`], one per status the spec declares.
@@ -44400,6 +48829,9 @@ pub mod vector_stores_api {
             Ok(request) => request,
             Err(error) => return api.invalid_request(error),
         };
+        if let Err(errors) = crate::models::validation::Validate::validate(&request) {
+            return api.invalid_request(super::RequestError::invalid(errors));
+        }
         match api.create_vector_store_file(request).await {
             Ok(response) => axum::response::IntoResponse::into_response(response),
             Err(error) => api.server_error(error),
@@ -44431,6 +48863,23 @@ pub mod vector_stores_api {
         pub body: models::CreateVectorStoreFileBatchRequest,
         /// The request's headers, with its header and cookie parameters and credentials.
         pub headers: http::HeaderMap,
+    }
+
+    /// The spec's validation keywords of the parameters, at `path.<name>` and `query.<name>`, and of the body, at
+    /// `body`.
+    #[cfg(feature = "vectorstore")]
+    impl crate::models::validation::Validate for CreateVectorStoreFileBatchRequest {
+        fn validate_into(
+            &self,
+            path: &crate::models::validation::Path<'_>,
+            errors: &mut Vec<crate::models::validation::ValidationError>,
+        ) {
+            crate::models::validation::Validate::validate_into(
+                &self.body,
+                &path.field("body"),
+                errors,
+            );
+        }
     }
 
     /// The responses of [`VectorStoresApi::create_vector_store_file_batch`], one per status the spec declares.
@@ -44510,6 +48959,9 @@ pub mod vector_stores_api {
             Ok(request) => request,
             Err(error) => return api.invalid_request(error),
         };
+        if let Err(errors) = crate::models::validation::Validate::validate(&request) {
+            return api.invalid_request(super::RequestError::invalid(errors));
+        }
         match api.create_vector_store_file_batch(request).await {
             Ok(response) => axum::response::IntoResponse::into_response(response),
             Err(error) => api.server_error(error),
@@ -45328,6 +49780,23 @@ pub mod vector_stores_api {
         pub headers: http::HeaderMap,
     }
 
+    /// The spec's validation keywords of the parameters, at `path.<name>` and `query.<name>`, and of the body, at
+    /// `body`.
+    #[cfg(feature = "vectorstore")]
+    impl crate::models::validation::Validate for ModifyVectorStoreRequest {
+        fn validate_into(
+            &self,
+            path: &crate::models::validation::Path<'_>,
+            errors: &mut Vec<crate::models::validation::ValidationError>,
+        ) {
+            crate::models::validation::Validate::validate_into(
+                &self.body,
+                &path.field("body"),
+                errors,
+            );
+        }
+    }
+
     /// The responses of [`VectorStoresApi::modify_vector_store`], one per status the spec declares.
     #[cfg(feature = "vectorstore")]
     #[derive(Clone, Debug)]
@@ -45397,6 +49866,9 @@ pub mod vector_stores_api {
             Ok(request) => request,
             Err(error) => return api.invalid_request(error),
         };
+        if let Err(errors) = crate::models::validation::Validate::validate(&request) {
+            return api.invalid_request(super::RequestError::invalid(errors));
+        }
         match api.modify_vector_store(request).await {
             Ok(response) => axum::response::IntoResponse::into_response(response),
             Err(error) => api.server_error(error),
@@ -45530,6 +50002,23 @@ pub mod vector_stores_api {
         pub headers: http::HeaderMap,
     }
 
+    /// The spec's validation keywords of the parameters, at `path.<name>` and `query.<name>`, and of the body, at
+    /// `body`.
+    #[cfg(feature = "vectorstore")]
+    impl crate::models::validation::Validate for SearchVectorStoreRequest {
+        fn validate_into(
+            &self,
+            path: &crate::models::validation::Path<'_>,
+            errors: &mut Vec<crate::models::validation::ValidationError>,
+        ) {
+            crate::models::validation::Validate::validate_into(
+                &self.body,
+                &path.field("body"),
+                errors,
+            );
+        }
+    }
+
     /// The responses of [`VectorStoresApi::search_vector_store`], one per status the spec declares.
     #[cfg(feature = "vectorstore")]
     #[derive(Clone, Debug)]
@@ -45594,6 +50083,9 @@ pub mod vector_stores_api {
             Ok(request) => request,
             Err(error) => return api.invalid_request(error),
         };
+        if let Err(errors) = crate::models::validation::Validate::validate(&request) {
+            return api.invalid_request(super::RequestError::invalid(errors));
+        }
         match api.search_vector_store(request).await {
             Ok(response) => axum::response::IntoResponse::into_response(response),
             Err(error) => api.server_error(error),
@@ -45627,6 +50119,23 @@ pub mod vector_stores_api {
         pub body: models::UpdateVectorStoreFileAttributesRequest,
         /// The request's headers, with its header and cookie parameters and credentials.
         pub headers: http::HeaderMap,
+    }
+
+    /// The spec's validation keywords of the parameters, at `path.<name>` and `query.<name>`, and of the body, at
+    /// `body`.
+    #[cfg(feature = "vectorstore")]
+    impl crate::models::validation::Validate for UpdateVectorStoreFileAttributesRequest {
+        fn validate_into(
+            &self,
+            path: &crate::models::validation::Path<'_>,
+            errors: &mut Vec<crate::models::validation::ValidationError>,
+        ) {
+            crate::models::validation::Validate::validate_into(
+                &self.body,
+                &path.field("body"),
+                errors,
+            );
+        }
     }
 
     /// The responses of [`VectorStoresApi::update_vector_store_file_attributes`], one per status the spec declares.
@@ -45706,6 +50215,9 @@ pub mod vector_stores_api {
             Ok(request) => request,
             Err(error) => return api.invalid_request(error),
         };
+        if let Err(errors) = crate::models::validation::Validate::validate(&request) {
+            return api.invalid_request(super::RequestError::invalid(errors));
+        }
         match api.update_vector_store_file_attributes(request).await {
             Ok(response) => axum::response::IntoResponse::into_response(response),
             Err(error) => api.server_error(error),
@@ -45916,6 +50428,23 @@ pub mod videos_api {
         pub headers: http::HeaderMap,
     }
 
+    /// The spec's validation keywords of the parameters, at `path.<name>` and `query.<name>`, and of the body, at
+    /// `body`.
+    #[cfg(feature = "video")]
+    impl crate::models::validation::Validate for CreateVideoRequest {
+        fn validate_into(
+            &self,
+            path: &crate::models::validation::Path<'_>,
+            errors: &mut Vec<crate::models::validation::ValidationError>,
+        ) {
+            crate::models::validation::Validate::validate_into(
+                &self.body,
+                &path.field("body"),
+                errors,
+            );
+        }
+    }
+
     /// The request body of [`VideosApi::create_video`], one of the media types the spec gives it: a variant per kind,
     /// chosen by the request's `Content-Type`.
     #[cfg(feature = "video")]
@@ -45925,6 +50454,24 @@ pub mod videos_api {
         Multipart(CreateVideoForm),
         /// `application/json`
         Json(models::CreateVideoJsonBody),
+    }
+
+    #[cfg(feature = "video")]
+    impl crate::models::validation::Validate for CreateVideoBody {
+        fn validate_into(
+            &self,
+            path: &crate::models::validation::Path<'_>,
+            errors: &mut Vec<crate::models::validation::ValidationError>,
+        ) {
+            match self {
+                CreateVideoBody::Multipart(value) => {
+                    crate::models::validation::Validate::validate_into(value, path, errors);
+                }
+                CreateVideoBody::Json(value) => {
+                    crate::models::validation::Validate::validate_into(value, path, errors);
+                }
+            }
+        }
     }
 
     #[cfg(feature = "video")]
@@ -45967,6 +50514,23 @@ pub mod videos_api {
         pub seconds: Option<models::VideoSeconds>,
         /// `size`
         pub size: Option<models::VideoSize>,
+    }
+
+    #[cfg(feature = "video")]
+    impl crate::models::validation::Validate for CreateVideoForm {
+        fn validate_into(
+            &self,
+            path: &crate::models::validation::Path<'_>,
+            errors: &mut Vec<crate::models::validation::ValidationError>,
+        ) {
+            crate::models::validation::length(
+                &self.prompt,
+                Some(1),
+                Some(32000),
+                &path.field("prompt"),
+                errors,
+            );
+        }
     }
 
     #[cfg(feature = "video")]
@@ -46104,6 +50668,9 @@ pub mod videos_api {
             Ok(request) => request,
             Err(error) => return api.invalid_request(error),
         };
+        if let Err(errors) = crate::models::validation::Validate::validate(&request) {
+            return api.invalid_request(super::RequestError::invalid(errors));
+        }
         match api.create_video(request).await {
             Ok(response) => axum::response::IntoResponse::into_response(response),
             Err(error) => api.server_error(error),
@@ -46128,6 +50695,23 @@ pub mod videos_api {
         pub headers: http::HeaderMap,
     }
 
+    /// The spec's validation keywords of the parameters, at `path.<name>` and `query.<name>`, and of the body, at
+    /// `body`.
+    #[cfg(feature = "video")]
+    impl crate::models::validation::Validate for CreateVideoCharacterRequest {
+        fn validate_into(
+            &self,
+            path: &crate::models::validation::Path<'_>,
+            errors: &mut Vec<crate::models::validation::ValidationError>,
+        ) {
+            crate::models::validation::Validate::validate_into(
+                &self.body,
+                &path.field("body"),
+                errors,
+            );
+        }
+    }
+
     /// The `multipart/form-data` body of [`VideosApi::create_video_character`]: a field per property, a
     /// [`FilePart`](super::FilePart) per file.
     #[cfg(feature = "video")]
@@ -46137,6 +50721,23 @@ pub mod videos_api {
         pub video: super::FilePart,
         /// `name`: Display name for this API character.
         pub name: String,
+    }
+
+    #[cfg(feature = "video")]
+    impl crate::models::validation::Validate for CreateVideoCharacterForm {
+        fn validate_into(
+            &self,
+            path: &crate::models::validation::Path<'_>,
+            errors: &mut Vec<crate::models::validation::ValidationError>,
+        ) {
+            crate::models::validation::length(
+                &self.name,
+                Some(1),
+                Some(80),
+                &path.field("name"),
+                errors,
+            );
+        }
     }
 
     #[cfg(feature = "video")]
@@ -46209,6 +50810,9 @@ pub mod videos_api {
             Ok(request) => request,
             Err(error) => return api.invalid_request(error),
         };
+        if let Err(errors) = crate::models::validation::Validate::validate(&request) {
+            return api.invalid_request(super::RequestError::invalid(errors));
+        }
         match api.create_video_character(request).await {
             Ok(response) => axum::response::IntoResponse::into_response(response),
             Err(error) => api.server_error(error),
@@ -46239,6 +50843,23 @@ pub mod videos_api {
         pub headers: http::HeaderMap,
     }
 
+    /// The spec's validation keywords of the parameters, at `path.<name>` and `query.<name>`, and of the body, at
+    /// `body`.
+    #[cfg(feature = "video")]
+    impl crate::models::validation::Validate for CreateVideoEditRequest {
+        fn validate_into(
+            &self,
+            path: &crate::models::validation::Path<'_>,
+            errors: &mut Vec<crate::models::validation::ValidationError>,
+        ) {
+            crate::models::validation::Validate::validate_into(
+                &self.body,
+                &path.field("body"),
+                errors,
+            );
+        }
+    }
+
     /// The request body of [`VideosApi::create_video_edit`], one of the media types the spec gives it: a variant per kind,
     /// chosen by the request's `Content-Type`.
     #[cfg(feature = "video")]
@@ -46248,6 +50869,24 @@ pub mod videos_api {
         Multipart(CreateVideoEditForm),
         /// `application/json`
         Json(models::CreateVideoEditJsonBody),
+    }
+
+    #[cfg(feature = "video")]
+    impl crate::models::validation::Validate for CreateVideoEditBody {
+        fn validate_into(
+            &self,
+            path: &crate::models::validation::Path<'_>,
+            errors: &mut Vec<crate::models::validation::ValidationError>,
+        ) {
+            match self {
+                CreateVideoEditBody::Multipart(value) => {
+                    crate::models::validation::Validate::validate_into(value, path, errors);
+                }
+                CreateVideoEditBody::Json(value) => {
+                    crate::models::validation::Validate::validate_into(value, path, errors);
+                }
+            }
+        }
     }
 
     #[cfg(feature = "video")]
@@ -46286,6 +50925,23 @@ pub mod videos_api {
         pub video: CreateVideoEditVideo,
         /// `prompt`: Text prompt that describes how to edit the source video.
         pub prompt: String,
+    }
+
+    #[cfg(feature = "video")]
+    impl crate::models::validation::Validate for CreateVideoEditForm {
+        fn validate_into(
+            &self,
+            path: &crate::models::validation::Path<'_>,
+            errors: &mut Vec<crate::models::validation::ValidationError>,
+        ) {
+            crate::models::validation::length(
+                &self.prompt,
+                Some(1),
+                Some(32000),
+                &path.field("prompt"),
+                errors,
+            );
+        }
     }
 
     #[cfg(feature = "video")]
@@ -46406,6 +51062,9 @@ pub mod videos_api {
             Ok(request) => request,
             Err(error) => return api.invalid_request(error),
         };
+        if let Err(errors) = crate::models::validation::Validate::validate(&request) {
+            return api.invalid_request(super::RequestError::invalid(errors));
+        }
         match api.create_video_edit(request).await {
             Ok(response) => axum::response::IntoResponse::into_response(response),
             Err(error) => api.server_error(error),
@@ -46430,6 +51089,23 @@ pub mod videos_api {
         pub headers: http::HeaderMap,
     }
 
+    /// The spec's validation keywords of the parameters, at `path.<name>` and `query.<name>`, and of the body, at
+    /// `body`.
+    #[cfg(feature = "video")]
+    impl crate::models::validation::Validate for CreateVideoExtendRequest {
+        fn validate_into(
+            &self,
+            path: &crate::models::validation::Path<'_>,
+            errors: &mut Vec<crate::models::validation::ValidationError>,
+        ) {
+            crate::models::validation::Validate::validate_into(
+                &self.body,
+                &path.field("body"),
+                errors,
+            );
+        }
+    }
+
     /// The request body of [`VideosApi::create_video_extend`], one of the media types the spec gives it: a variant per kind,
     /// chosen by the request's `Content-Type`.
     #[cfg(feature = "video")]
@@ -46439,6 +51115,24 @@ pub mod videos_api {
         Multipart(CreateVideoExtendForm),
         /// `application/json`
         Json(models::CreateVideoExtendJsonBody),
+    }
+
+    #[cfg(feature = "video")]
+    impl crate::models::validation::Validate for CreateVideoExtendBody {
+        fn validate_into(
+            &self,
+            path: &crate::models::validation::Path<'_>,
+            errors: &mut Vec<crate::models::validation::ValidationError>,
+        ) {
+            match self {
+                CreateVideoExtendBody::Multipart(value) => {
+                    crate::models::validation::Validate::validate_into(value, path, errors);
+                }
+                CreateVideoExtendBody::Json(value) => {
+                    crate::models::validation::Validate::validate_into(value, path, errors);
+                }
+            }
+        }
     }
 
     #[cfg(feature = "video")]
@@ -46479,6 +51173,23 @@ pub mod videos_api {
         pub prompt: String,
         /// `seconds`
         pub seconds: models::VideoSeconds,
+    }
+
+    #[cfg(feature = "video")]
+    impl crate::models::validation::Validate for CreateVideoExtendForm {
+        fn validate_into(
+            &self,
+            path: &crate::models::validation::Path<'_>,
+            errors: &mut Vec<crate::models::validation::ValidationError>,
+        ) {
+            crate::models::validation::length(
+                &self.prompt,
+                Some(1),
+                Some(32000),
+                &path.field("prompt"),
+                errors,
+            );
+        }
     }
 
     #[cfg(feature = "video")]
@@ -46611,6 +51322,9 @@ pub mod videos_api {
             Ok(request) => request,
             Err(error) => return api.invalid_request(error),
         };
+        if let Err(errors) = crate::models::validation::Validate::validate(&request) {
+            return api.invalid_request(super::RequestError::invalid(errors));
+        }
         match api.create_video_extend(request).await {
             Ok(response) => axum::response::IntoResponse::into_response(response),
             Err(error) => api.server_error(error),
@@ -46637,6 +51351,23 @@ pub mod videos_api {
         pub headers: http::HeaderMap,
     }
 
+    /// The spec's validation keywords of the parameters, at `path.<name>` and `query.<name>`, and of the body, at
+    /// `body`.
+    #[cfg(feature = "video")]
+    impl crate::models::validation::Validate for CreateVideoRemixRequest {
+        fn validate_into(
+            &self,
+            path: &crate::models::validation::Path<'_>,
+            errors: &mut Vec<crate::models::validation::ValidationError>,
+        ) {
+            crate::models::validation::Validate::validate_into(
+                &self.body,
+                &path.field("body"),
+                errors,
+            );
+        }
+    }
+
     /// The request body of [`VideosApi::create_video_remix`], one of the media types the spec gives it: a variant per kind,
     /// chosen by the request's `Content-Type`.
     #[cfg(feature = "video")]
@@ -46646,6 +51377,24 @@ pub mod videos_api {
         Multipart(CreateVideoRemixForm),
         /// `application/json`
         Json(models::CreateVideoRemixBody),
+    }
+
+    #[cfg(feature = "video")]
+    impl crate::models::validation::Validate for CreateVideoRemixBody {
+        fn validate_into(
+            &self,
+            path: &crate::models::validation::Path<'_>,
+            errors: &mut Vec<crate::models::validation::ValidationError>,
+        ) {
+            match self {
+                CreateVideoRemixBody::Multipart(value) => {
+                    crate::models::validation::Validate::validate_into(value, path, errors);
+                }
+                CreateVideoRemixBody::Json(value) => {
+                    crate::models::validation::Validate::validate_into(value, path, errors);
+                }
+            }
+        }
     }
 
     #[cfg(feature = "video")]
@@ -46682,6 +51431,23 @@ pub mod videos_api {
     pub struct CreateVideoRemixForm {
         /// `prompt`: Updated text prompt that directs the remix generation.
         pub prompt: String,
+    }
+
+    #[cfg(feature = "video")]
+    impl crate::models::validation::Validate for CreateVideoRemixForm {
+        fn validate_into(
+            &self,
+            path: &crate::models::validation::Path<'_>,
+            errors: &mut Vec<crate::models::validation::ValidationError>,
+        ) {
+            crate::models::validation::length(
+                &self.prompt,
+                Some(1),
+                Some(32000),
+                &path.field("prompt"),
+                errors,
+            );
+        }
     }
 
     #[cfg(feature = "video")]
@@ -46778,6 +51544,9 @@ pub mod videos_api {
             Ok(request) => request,
             Err(error) => return api.invalid_request(error),
         };
+        if let Err(errors) = crate::models::validation::Validate::validate(&request) {
+            return api.invalid_request(super::RequestError::invalid(errors));
+        }
         match api.create_video_remix(request).await {
             Ok(response) => axum::response::IntoResponse::into_response(response),
             Err(error) => api.server_error(error),
@@ -47062,6 +51831,32 @@ pub mod videos_api {
         pub headers: http::HeaderMap,
     }
 
+    /// The spec's validation keywords of the parameters, at `path.<name>` and `query.<name>`, and of the body, at
+    /// `body`.
+    #[cfg(feature = "video")]
+    impl crate::models::validation::Validate for ListVideosRequest {
+        fn validate_into(
+            &self,
+            path: &crate::models::validation::Path<'_>,
+            errors: &mut Vec<crate::models::validation::ValidationError>,
+        ) {
+            if let Some(value0) = &self.limit {
+                crate::models::validation::minimum(
+                    *value0,
+                    0,
+                    &path.field("query").field("limit"),
+                    errors,
+                );
+                crate::models::validation::maximum(
+                    *value0,
+                    100,
+                    &path.field("query").field("limit"),
+                    errors,
+                );
+            }
+        }
+    }
+
     /// The responses of [`VideosApi::list_videos`], one per status the spec declares.
     #[cfg(feature = "video")]
     #[derive(Clone, Debug)]
@@ -47105,6 +51900,9 @@ pub mod videos_api {
             Ok(request) => request,
             Err(error) => return api.invalid_request(error),
         };
+        if let Err(errors) = crate::models::validation::Validate::validate(&request) {
+            return api.invalid_request(super::RequestError::invalid(errors));
+        }
         match api.list_videos(request).await {
             Ok(response) => axum::response::IntoResponse::into_response(response),
             Err(error) => api.server_error(error),
@@ -47231,5 +52029,318 @@ pub mod videos_api {
             })?,
             headers,
         })
+    }
+}
+
+/// The webhooks of the spec, sent to the endpoints receivers registered (`serverWebhooks`).
+///
+/// ```ignore
+/// use server::webhooks::{send, Client, StandardWebhooksLayer, Webhook, WebhookEndpoint, WebhookSecret};
+///
+/// // the layer signs as Standard Webhooks; a client without it sends unsigned
+/// let client = Client::default().layer(StandardWebhooksLayer::new(WebhookSecret::new("whsec_...")?));
+/// let endpoint = WebhookEndpoint::new("https://receiver.example.com/hooks", client);
+/// send(&endpoint, &Webhook::...(payload)).await?;
+/// ```
+///
+/// A delivery is one `POST` of the payload's JSON through the endpoint's client, whose layers sign it and retry it
+/// (`429`, `5xx`, failed connections). Sending again later, over hours or days, is the application's.
+pub mod webhooks {
+    #![allow(clippy::large_enum_variant)]
+
+    #[allow(unused_imports)]
+    use crate::models;
+
+    pub use timvw_rust_runtime::webhooks::{
+        verify, StandardWebhooksLayer, WebhookError, WebhookSecret,
+    };
+    pub use timvw_rust_runtime::Client;
+
+    /// A webhook of the spec, with its payload. It is sent as the payload's JSON.
+    #[derive(Clone, Debug, serde::Serialize)]
+    #[serde(untagged)]
+    pub enum Webhook {
+        /// `agent_environment_expired`: Sent when an agent environment expires and can no longer resume from a snapshot.
+        #[cfg(feature = "webhook-events-types")]
+        AgentEnvironmentExpired(models::WebhookAgentEnvironmentExpired),
+        /// `agent_environment_failed`: Sent when setup fails for a prewarmed OpenAI-hosted environment before it is attached to a session.
+        #[cfg(feature = "webhook-events-types")]
+        AgentEnvironmentFailed(models::WebhookAgentEnvironmentFailed),
+        /// `agent_environment_ready`: Sent when a prewarmed OpenAI-hosted environment finishes setup before being attached to a session.
+        #[cfg(feature = "webhook-events-types")]
+        AgentEnvironmentReady(models::WebhookAgentEnvironmentReady),
+        /// `agent_environment_suspended`: Sent when an agent environment is suspended and can resume from a snapshot.
+        #[cfg(feature = "webhook-events-types")]
+        AgentEnvironmentSuspended(models::WebhookAgentEnvironmentSuspended),
+        /// `agent_session_action_required`: Sent when an agent session requires an action. Retrieve the session for action details.
+        #[cfg(feature = "webhook-events-types")]
+        AgentSessionActionRequired(models::WebhookAgentSessionActionRequired),
+        /// `agent_session_created`: Sent when an agent session is created.
+        #[cfg(feature = "webhook-events-types")]
+        AgentSessionCreated(models::WebhookAgentSessionCreated),
+        /// `agent_session_failed`: Sent when an agent session fails.
+        #[cfg(feature = "webhook-events-types")]
+        AgentSessionFailed(models::WebhookAgentSessionFailed),
+        /// `agent_session_idle`: Sent when an agent session becomes idle.
+        #[cfg(feature = "webhook-events-types")]
+        AgentSessionIdle(models::WebhookAgentSessionIdle),
+        /// `agent_session_in_progress`: Sent when an agent session enters the in-progress state.
+        #[cfg(feature = "webhook-events-types")]
+        AgentSessionInProgress(models::WebhookAgentSessionInProgress),
+        /// `batch_cancelled`: Sent when a batch has been cancelled.
+        #[cfg(feature = "webhook-events-types")]
+        BatchCancelled(models::WebhookBatchCancelled),
+        /// `batch_completed`: Sent when a batch has completed processing.
+        #[cfg(feature = "webhook-events-types")]
+        BatchCompleted(models::WebhookBatchCompleted),
+        /// `batch_expired`: Sent when a batch has expired before completion.
+        #[cfg(feature = "webhook-events-types")]
+        BatchExpired(models::WebhookBatchExpired),
+        /// `batch_failed`: Sent when a batch has failed.
+        #[cfg(feature = "webhook-events-types")]
+        BatchFailed(models::WebhookBatchFailed),
+        /// `eval_run_canceled`: Sent when an eval run has been canceled.
+        #[cfg(feature = "webhook-events-types")]
+        EvalRunCanceled(models::WebhookEvalRunCanceled),
+        /// `eval_run_failed`: Sent when an eval run has failed.
+        #[cfg(feature = "webhook-events-types")]
+        EvalRunFailed(models::WebhookEvalRunFailed),
+        /// `eval_run_succeeded`: Sent when an eval run has succeeded.
+        #[cfg(feature = "webhook-events-types")]
+        EvalRunSucceeded(models::WebhookEvalRunSucceeded),
+        /// `fine_tuning_job_cancelled`: Sent when a fine-tuning job has been cancelled.
+        #[cfg(feature = "webhook-events-types")]
+        FineTuningJobCancelled(models::WebhookFineTuningJobCancelled),
+        /// `fine_tuning_job_failed`: Sent when a fine-tuning job has failed.
+        #[cfg(feature = "webhook-events-types")]
+        FineTuningJobFailed(models::WebhookFineTuningJobFailed),
+        /// `fine_tuning_job_succeeded`: Sent when a fine-tuning job has succeeded.
+        #[cfg(feature = "webhook-events-types")]
+        FineTuningJobSucceeded(models::WebhookFineTuningJobSucceeded),
+        /// `live_call_incoming`: Deprecated: use `live.transport.incoming`. Retained only for existing subscriptions. Sent when an incoming API SIP session is available for Live acceptance.
+        #[cfg(feature = "webhook-events-types")]
+        LiveCallIncoming(models::WebhookLiveCallIncoming),
+        /// `live_transport_connected`: Sent when a direct Live WebRTC session is created or an Instant Connect session activates.
+        #[cfg(feature = "webhook-events-types")]
+        LiveTransportConnected(models::WebhookLiveTransportConnected),
+        /// `live_transport_incoming`: Sent when an incoming API SIP session is available for Live acceptance.
+        #[cfg(feature = "webhook-events-types")]
+        LiveTransportIncoming(models::WebhookLiveTransportIncoming),
+        /// `realtime_call_incoming`: Sent when an incoming API SIP session is available for Realtime acceptance.
+        #[cfg(feature = "webhook-events-types")]
+        RealtimeCallIncoming(models::WebhookRealtimeCallIncoming),
+        /// `response_cancelled`: Sent when a background response has been cancelled.
+        #[cfg(feature = "webhook-events-types")]
+        ResponseCancelled(models::WebhookResponseCancelled),
+        /// `response_completed`: Sent when a background response has completed successfully.
+        #[cfg(feature = "webhook-events-types")]
+        ResponseCompleted(models::WebhookResponseCompleted),
+        /// `response_failed`: Sent when a background response has failed.
+        #[cfg(feature = "webhook-events-types")]
+        ResponseFailed(models::WebhookResponseFailed),
+        /// `response_incomplete`: Sent when a background response is incomplete.
+        #[cfg(feature = "webhook-events-types")]
+        ResponseIncomplete(models::WebhookResponseIncomplete),
+        /// `safety_alert_created`: Sent when an approved safety alert is available for an API project. Retrieve the alert with a project API key granted `api.safety.alerts.read`.
+        #[cfg(feature = "webhook-events-types")]
+        SafetyAlertCreated(models::WebhookSafetyAlertCreated),
+        /// `safety_deactivation_issued`: Sent when a deactivation is issued for a safety identifier in your organization. Retrieve the case details with `GET /v1/safety/cases/{id}` using `data.id`.
+        #[cfg(feature = "webhook-events-types")]
+        SafetyDeactivationIssued(models::WebhookSafetyDeactivationIssued),
+        /// `safety_org_alert_created`: Sent when an approved safety alert is available for an enterprise workspace. Retrieve the alert from `https://api.chatgpt.com/v1/safety/alerts/{id}` with an administrator API key for the workspace's backing organization granted `chatgpt.enterprise.safety_alerts.read`.
+        #[cfg(feature = "webhook-events-types")]
+        SafetyOrgAlertCreated(models::WebhookSafetyOrgAlertCreated),
+        /// `safety_warning_issued`: Sent when a warning is issued for a safety identifier in your organization. Retrieve the case details with `GET /v1/safety/cases/{id}` using `data.id`.
+        #[cfg(feature = "webhook-events-types")]
+        SafetyWarningIssued(models::WebhookSafetyWarningIssued),
+    }
+
+    impl Webhook {
+        /// The webhook's name in the spec.
+        pub fn name(&self) -> &'static str {
+            match *self {
+                #[cfg(feature = "webhook-events-types")]
+                Webhook::AgentEnvironmentExpired(_) => "agent_environment_expired",
+                #[cfg(feature = "webhook-events-types")]
+                Webhook::AgentEnvironmentFailed(_) => "agent_environment_failed",
+                #[cfg(feature = "webhook-events-types")]
+                Webhook::AgentEnvironmentReady(_) => "agent_environment_ready",
+                #[cfg(feature = "webhook-events-types")]
+                Webhook::AgentEnvironmentSuspended(_) => "agent_environment_suspended",
+                #[cfg(feature = "webhook-events-types")]
+                Webhook::AgentSessionActionRequired(_) => "agent_session_action_required",
+                #[cfg(feature = "webhook-events-types")]
+                Webhook::AgentSessionCreated(_) => "agent_session_created",
+                #[cfg(feature = "webhook-events-types")]
+                Webhook::AgentSessionFailed(_) => "agent_session_failed",
+                #[cfg(feature = "webhook-events-types")]
+                Webhook::AgentSessionIdle(_) => "agent_session_idle",
+                #[cfg(feature = "webhook-events-types")]
+                Webhook::AgentSessionInProgress(_) => "agent_session_in_progress",
+                #[cfg(feature = "webhook-events-types")]
+                Webhook::BatchCancelled(_) => "batch_cancelled",
+                #[cfg(feature = "webhook-events-types")]
+                Webhook::BatchCompleted(_) => "batch_completed",
+                #[cfg(feature = "webhook-events-types")]
+                Webhook::BatchExpired(_) => "batch_expired",
+                #[cfg(feature = "webhook-events-types")]
+                Webhook::BatchFailed(_) => "batch_failed",
+                #[cfg(feature = "webhook-events-types")]
+                Webhook::EvalRunCanceled(_) => "eval_run_canceled",
+                #[cfg(feature = "webhook-events-types")]
+                Webhook::EvalRunFailed(_) => "eval_run_failed",
+                #[cfg(feature = "webhook-events-types")]
+                Webhook::EvalRunSucceeded(_) => "eval_run_succeeded",
+                #[cfg(feature = "webhook-events-types")]
+                Webhook::FineTuningJobCancelled(_) => "fine_tuning_job_cancelled",
+                #[cfg(feature = "webhook-events-types")]
+                Webhook::FineTuningJobFailed(_) => "fine_tuning_job_failed",
+                #[cfg(feature = "webhook-events-types")]
+                Webhook::FineTuningJobSucceeded(_) => "fine_tuning_job_succeeded",
+                #[cfg(feature = "webhook-events-types")]
+                Webhook::LiveCallIncoming(_) => "live_call_incoming",
+                #[cfg(feature = "webhook-events-types")]
+                Webhook::LiveTransportConnected(_) => "live_transport_connected",
+                #[cfg(feature = "webhook-events-types")]
+                Webhook::LiveTransportIncoming(_) => "live_transport_incoming",
+                #[cfg(feature = "webhook-events-types")]
+                Webhook::RealtimeCallIncoming(_) => "realtime_call_incoming",
+                #[cfg(feature = "webhook-events-types")]
+                Webhook::ResponseCancelled(_) => "response_cancelled",
+                #[cfg(feature = "webhook-events-types")]
+                Webhook::ResponseCompleted(_) => "response_completed",
+                #[cfg(feature = "webhook-events-types")]
+                Webhook::ResponseFailed(_) => "response_failed",
+                #[cfg(feature = "webhook-events-types")]
+                Webhook::ResponseIncomplete(_) => "response_incomplete",
+                #[cfg(feature = "webhook-events-types")]
+                Webhook::SafetyAlertCreated(_) => "safety_alert_created",
+                #[cfg(feature = "webhook-events-types")]
+                Webhook::SafetyDeactivationIssued(_) => "safety_deactivation_issued",
+                #[cfg(feature = "webhook-events-types")]
+                Webhook::SafetyOrgAlertCreated(_) => "safety_org_alert_created",
+                #[cfg(feature = "webhook-events-types")]
+                Webhook::SafetyWarningIssued(_) => "safety_warning_issued",
+            }
+        }
+    }
+
+    /// Where a receiver wants webhooks: its URL, the client to send with (with the layers that sign and retry), and
+    /// the webhooks it wants (every one when none are named).
+    #[derive(Clone)]
+    pub struct WebhookEndpoint {
+        url: String,
+        client: Client,
+        events: Vec<String>,
+    }
+
+    impl WebhookEndpoint {
+        /// The endpoint at `url`, sent to with `client`, for every webhook.
+        pub fn new(url: impl Into<String>, client: Client) -> Self {
+            WebhookEndpoint {
+                url: url.into(),
+                client,
+                events: Vec::new(),
+            }
+        }
+
+        /// Only the webhooks of these names (as [`Webhook::name`] gives them).
+        pub fn events<I, S>(mut self, events: I) -> Self
+        where
+            I: IntoIterator<Item = S>,
+            S: Into<String>,
+        {
+            self.events = events.into_iter().map(Into::into).collect();
+            self
+        }
+
+        /// Its URL.
+        pub fn url(&self) -> &str {
+            &self.url
+        }
+
+        /// Whether it wants `webhook`.
+        pub fn wants(&self, webhook: &Webhook) -> bool {
+            self.events.is_empty() || self.events.iter().any(|event| event == webhook.name())
+        }
+    }
+
+    impl std::fmt::Debug for WebhookEndpoint {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            f.debug_struct("WebhookEndpoint")
+                .field("url", &self.url)
+                .field("events", &self.events)
+                .finish_non_exhaustive()
+        }
+    }
+
+    /// What became of a webhook sent to an endpoint.
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub enum Delivery {
+        /// The endpoint answered with this `2xx`.
+        Delivered(http::StatusCode),
+        /// The endpoint does not want this webhook: nothing was sent.
+        NotWanted,
+    }
+
+    /// Why a webhook was not delivered.
+    #[derive(Debug)]
+    #[non_exhaustive]
+    pub enum SendError {
+        /// The payload could not be written as JSON.
+        Json(serde_json::Error),
+        /// The request failed (after the client's retries): no answer, or a layer refused it.
+        Request(timvw_rust_runtime::Error),
+        /// The endpoint answered with a status that is not `2xx` (after the client's retries).
+        Status(http::StatusCode),
+    }
+
+    impl std::fmt::Display for SendError {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            match self {
+                SendError::Json(error) => {
+                    write!(f, "the webhook could not be written as JSON: {error}")
+                }
+                SendError::Request(error) => write!(f, "the webhook could not be sent: {error}"),
+                SendError::Status(status) => {
+                    write!(f, "the endpoint answered the webhook with {status}")
+                }
+            }
+        }
+    }
+
+    impl std::error::Error for SendError {
+        fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+            match self {
+                SendError::Json(error) => Some(error),
+                SendError::Request(error) => Some(error),
+                SendError::Status(_) => None,
+            }
+        }
+    }
+
+    /// Sends `webhook` to `endpoint`, unless it does not want it: one `POST` of its JSON through the endpoint's client.
+    pub async fn send(
+        endpoint: &WebhookEndpoint,
+        webhook: &Webhook,
+    ) -> Result<Delivery, SendError> {
+        if !endpoint.wants(webhook) {
+            return Ok(Delivery::NotWanted);
+        }
+        let body = serde_json::to_vec(webhook).map_err(SendError::Json)?;
+        let response = endpoint
+            .client
+            .request(timvw_rust_runtime::Method::POST, &endpoint.url)
+            .header(http::header::CONTENT_TYPE, "application/json")
+            .body(timvw_rust_runtime::Body::from(body))
+            .send()
+            .await
+            .map_err(SendError::Request)?;
+        let status = response.status();
+        if status.is_success() {
+            Ok(Delivery::Delivered(status))
+        } else {
+            Err(SendError::Status(status))
+        }
     }
 }

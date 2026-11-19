@@ -13,6 +13,7 @@ use serde::{Deserialize, Serialize};
 
 /// PersistedAgentToolResourceMcp : Tools provided by a remote MCP server without stored credentials.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, bon::Builder)]
+#[builder(state_mod = persisted_agent_tool_resource_mcp_builder, finish_fn(vis = "", name = build_internal))]
 pub struct PersistedAgentToolResourceMcp {
     /// The type of the object. Always `mcp`.  Defaults to `\"mcp\"`.
     #[serde(rename = "type")]
@@ -25,7 +26,7 @@ pub struct PersistedAgentToolResourceMcp {
     /// The vault credential selected for this MCP server, if any.
     ///
     /// Validation: `minLength: 0`.
-    #[serde(rename = "credential_id", deserialize_with = "Option::deserialize")]
+    #[serde(rename = "credential_id", default)]
     pub credential_id: Option<String>,
     #[serde(rename = "transport")]
     pub transport: models::PersistedMcpTransportResource,
@@ -37,7 +38,7 @@ pub struct PersistedAgentToolResourceMcp {
     /// The MCP tools the agent may call, or null when all server tools are allowed.
     ///
     /// Validation: `minItems: 0`, `maxItems: 2000`; each item: `minLength: 0`.
-    #[serde(rename = "allowed_tools", deserialize_with = "Option::deserialize")]
+    #[serde(rename = "allowed_tools", default)]
     pub allowed_tools: Option<Vec<String>>,
     /// Whether this MCP server must initialize before the first turn.
     #[serde(rename = "required")]
@@ -68,6 +69,22 @@ impl PersistedAgentToolResourceMcp {
             required,
             connection_origin,
         }
+    }
+}
+
+impl<S: persisted_agent_tool_resource_mcp_builder::State> PersistedAgentToolResourceMcpBuilder<S>
+where
+    S::Type: persisted_agent_tool_resource_mcp_builder::IsSet,
+    S::ServerLabel: persisted_agent_tool_resource_mcp_builder::IsSet,
+    S::Transport: persisted_agent_tool_resource_mcp_builder::IsSet,
+    S::RequestMetadata: persisted_agent_tool_resource_mcp_builder::IsSet,
+    S::Required: persisted_agent_tool_resource_mcp_builder::IsSet,
+    S::ConnectionOrigin: persisted_agent_tool_resource_mcp_builder::IsSet,
+{
+    /// Finish building and return the requested object
+    #[inline(always)]
+    pub fn build(self) -> PersistedAgentToolResourceMcp {
+        self.build_internal()
     }
 }
 

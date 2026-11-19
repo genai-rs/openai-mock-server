@@ -13,6 +13,7 @@ use serde::{Deserialize, Serialize};
 
 /// CommandExecutionItemResource : A command execution produced by the agent.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, bon::Builder)]
+#[builder(state_mod = command_execution_item_resource_builder, finish_fn(vis = "", name = build_internal))]
 pub struct CommandExecutionItemResource {
     /// The item type. Always `command_execution`.  Defaults to `\"command_execution\"`.
     #[serde(rename = "type")]
@@ -35,20 +36,20 @@ pub struct CommandExecutionItemResource {
     /// The working directory used to execute the command.
     ///
     /// Validation: `minLength: 0`.
-    #[serde(rename = "cwd", deserialize_with = "Option::deserialize")]
+    #[serde(rename = "cwd", default)]
     pub cwd: Option<String>,
     #[serde(rename = "status")]
     pub status: models::FunctionCallStatusResource,
     /// The command output, if available.
     ///
     /// Validation: `minLength: 0`.
-    #[serde(rename = "output", deserialize_with = "Option::deserialize")]
+    #[serde(rename = "output", default)]
     pub output: Option<String>,
     /// The process exit code, if the command completed.
-    #[serde(rename = "exit_code", deserialize_with = "Option::deserialize")]
+    #[serde(rename = "exit_code", default)]
     pub exit_code: Option<i64>,
     /// The command duration in milliseconds.
-    #[serde(rename = "duration_ms", deserialize_with = "Option::deserialize")]
+    #[serde(rename = "duration_ms", default)]
     pub duration_ms: Option<i64>,
 }
 
@@ -76,6 +77,21 @@ impl CommandExecutionItemResource {
             exit_code,
             duration_ms,
         }
+    }
+}
+
+impl<S: command_execution_item_resource_builder::State> CommandExecutionItemResourceBuilder<S>
+where
+    S::Type: command_execution_item_resource_builder::IsSet,
+    S::Id: command_execution_item_resource_builder::IsSet,
+    S::TurnId: command_execution_item_resource_builder::IsSet,
+    S::Command: command_execution_item_resource_builder::IsSet,
+    S::Status: command_execution_item_resource_builder::IsSet,
+{
+    /// Finish building and return the requested object
+    #[inline(always)]
+    pub fn build(self) -> CommandExecutionItemResource {
+        self.build_internal()
     }
 }
 

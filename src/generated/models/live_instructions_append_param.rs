@@ -12,6 +12,7 @@ use serde::{Deserialize, Serialize};
 
 /// LiveInstructionsAppendParam : Append developer instructions to the Live conversation while it is running, optionally associating them with an existing client delegation. Rejected while an audio fixture is active. These instructions remain in conversation history through compaction and are included in future backend delegations. For external audio, describe content already delivered so the assistant does not repeat it.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, bon::Builder)]
+#[builder(state_mod = live_instructions_append_param_builder, finish_fn(vis = "", name = build_internal))]
 pub struct LiveInstructionsAppendParam {
     /// Optional client identifier for correlating this command with a server event's client_event_id or error.client_event_id.
     ///
@@ -29,7 +30,7 @@ pub struct LiveInstructionsAppendParam {
     /// Required, nullable. Set null for general session context, or use the ID from session.delegation.created for an existing client delegation. Non-null IDs are not accepted with Responses delegation.
     ///
     /// Validation: `minLength: 1`.
-    #[serde(rename = "delegation_id", deserialize_with = "Option::deserialize")]
+    #[serde(rename = "delegation_id", default)]
     pub delegation_id: Option<String>,
     /// Instruction text to append, limited to 500 tokens. This is a plain string, not an array of content parts.
     #[serde(rename = "content")]
@@ -49,6 +50,18 @@ impl LiveInstructionsAppendParam {
             delegation_id,
             content,
         }
+    }
+}
+
+impl<S: live_instructions_append_param_builder::State> LiveInstructionsAppendParamBuilder<S>
+where
+    S::Type: live_instructions_append_param_builder::IsSet,
+    S::Content: live_instructions_append_param_builder::IsSet,
+{
+    /// Finish building and return the requested object
+    #[inline(always)]
+    pub fn build(self) -> LiveInstructionsAppendParam {
+        self.build_internal()
     }
 }
 

@@ -13,8 +13,9 @@ use serde::{Deserialize, Serialize};
 
 /// InferenceOptions : Model and tool overrides applied when generating the assistant response.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, bon::Builder)]
+#[builder(state_mod = inference_options_builder, finish_fn(vis = "", name = build_internal))]
 pub struct InferenceOptions {
-    #[serde(rename = "tool_choice", deserialize_with = "Option::deserialize")]
+    #[serde(rename = "tool_choice", default)]
     pub tool_choice: Option<models::ToolChoice>,
     /// ID of the model to use
     #[serde(rename = "model")]
@@ -25,6 +26,17 @@ impl InferenceOptions {
     /// Model and tool overrides applied when generating the assistant response.
     pub fn new(tool_choice: Option<models::ToolChoice>, model: String) -> InferenceOptions {
         InferenceOptions { tool_choice, model }
+    }
+}
+
+impl<S: inference_options_builder::State> InferenceOptionsBuilder<S>
+where
+    S::Model: inference_options_builder::IsSet,
+{
+    /// Finish building and return the requested object
+    #[inline(always)]
+    pub fn build(self) -> InferenceOptions {
+        self.build_internal()
     }
 }
 

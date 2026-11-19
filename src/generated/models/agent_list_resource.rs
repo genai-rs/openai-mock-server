@@ -13,6 +13,7 @@ use serde::{Deserialize, Serialize};
 
 /// AgentListResource : A page of Agents API resources, with IDs for retrieving additional pages.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, bon::Builder)]
+#[builder(state_mod = agent_list_resource_builder, finish_fn(vis = "", name = build_internal))]
 pub struct AgentListResource {
     /// The object type, which is always `list`.  Defaults to `\"list\"`.
     #[serde(rename = "object")]
@@ -25,12 +26,12 @@ pub struct AgentListResource {
     /// The ID of the first resource in `data`, or `null` if the page is empty.
     ///
     /// Validation: `minLength: 0`.
-    #[serde(rename = "first_id", deserialize_with = "Option::deserialize")]
+    #[serde(rename = "first_id", default)]
     pub first_id: Option<String>,
     /// The ID of the last resource in `data`, or `null` if the page is empty. Pass this as `after` with the same order and filters.
     ///
     /// Validation: `minLength: 0`.
-    #[serde(rename = "last_id", deserialize_with = "Option::deserialize")]
+    #[serde(rename = "last_id", default)]
     pub last_id: Option<String>,
     /// Whether there are more resources to retrieve after this page.
     #[serde(rename = "has_more")]
@@ -53,6 +54,19 @@ impl AgentListResource {
             last_id,
             has_more,
         }
+    }
+}
+
+impl<S: agent_list_resource_builder::State> AgentListResourceBuilder<S>
+where
+    S::Object: agent_list_resource_builder::IsSet,
+    S::Data: agent_list_resource_builder::IsSet,
+    S::HasMore: agent_list_resource_builder::IsSet,
+{
+    /// Finish building and return the requested object
+    #[inline(always)]
+    pub fn build(self) -> AgentListResource {
+        self.build_internal()
     }
 }
 

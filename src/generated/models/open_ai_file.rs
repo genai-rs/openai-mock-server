@@ -12,12 +12,13 @@ use serde::{Deserialize, Serialize};
 
 /// OpenAiFile : The `File` object represents a document that has been uploaded to OpenAI.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, bon::Builder)]
+#[builder(state_mod = open_ai_file_builder, finish_fn(vis = "", name = build_internal))]
 pub struct OpenAiFile {
     /// The file identifier, which can be referenced in the API endpoints.
     #[serde(rename = "id")]
     pub id: String,
     /// The size of the file, in bytes. In a completed file upload response, this can be null when the file size is not yet available.
-    #[serde(rename = "bytes", deserialize_with = "Option::deserialize")]
+    #[serde(rename = "bytes", default)]
     pub bytes: Option<i64>,
     /// The Unix timestamp (in seconds) for when the file was created.
     #[serde(rename = "created_at", with = "super::unix_time")]
@@ -69,6 +70,22 @@ impl OpenAiFile {
             status,
             status_details: None,
         }
+    }
+}
+
+impl<S: open_ai_file_builder::State> OpenAiFileBuilder<S>
+where
+    S::Id: open_ai_file_builder::IsSet,
+    S::CreatedAt: open_ai_file_builder::IsSet,
+    S::Filename: open_ai_file_builder::IsSet,
+    S::Object: open_ai_file_builder::IsSet,
+    S::Purpose: open_ai_file_builder::IsSet,
+    S::Status: open_ai_file_builder::IsSet,
+{
+    /// Finish building and return the requested object
+    #[inline(always)]
+    pub fn build(self) -> OpenAiFile {
+        self.build_internal()
     }
 }
 

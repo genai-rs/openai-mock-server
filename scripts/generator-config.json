@@ -4,6 +4,8 @@
     "server"
   ],
   "serverDefaultMethods": true,
+  "serverValidation": true,
+  "serverWebhooks": true,
   "apiFeaturesFile": "scripts/api-features.yaml",
   "dateLibrary": "jiff",
   "titleNaming": false,

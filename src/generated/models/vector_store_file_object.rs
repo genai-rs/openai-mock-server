@@ -13,6 +13,7 @@ use serde::{Deserialize, Serialize};
 
 /// VectorStoreFileObject : A list of files attached to a vector store.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, bon::Builder)]
+#[builder(state_mod = vector_store_file_object_builder, finish_fn(vis = "", name = build_internal))]
 pub struct VectorStoreFileObject {
     /// The identifier, which can be referenced in API endpoints.
     #[serde(rename = "id")]
@@ -32,7 +33,7 @@ pub struct VectorStoreFileObject {
     /// The status of the vector store file, which can be either `in_progress`, `completed`, `cancelled`, or `failed`. The status `completed` indicates that the vector store file is ready for use.
     #[serde(rename = "status")]
     pub status: Status,
-    #[serde(rename = "last_error", deserialize_with = "Option::deserialize")]
+    #[serde(rename = "last_error", default)]
     pub last_error: Option<models::VectorStoreFileObjectLastError>,
     #[serde(rename = "chunking_strategy", skip_serializing_if = "Option::is_none")]
     pub chunking_strategy: Option<models::VectorStoreFileObjectChunkingStrategy>,
@@ -71,6 +72,22 @@ impl VectorStoreFileObject {
             chunking_strategy: None,
             attributes: None,
         }
+    }
+}
+
+impl<S: vector_store_file_object_builder::State> VectorStoreFileObjectBuilder<S>
+where
+    S::Id: vector_store_file_object_builder::IsSet,
+    S::Object: vector_store_file_object_builder::IsSet,
+    S::UsageBytes: vector_store_file_object_builder::IsSet,
+    S::CreatedAt: vector_store_file_object_builder::IsSet,
+    S::VectorStoreId: vector_store_file_object_builder::IsSet,
+    S::Status: vector_store_file_object_builder::IsSet,
+{
+    /// Finish building and return the requested object
+    #[inline(always)]
+    pub fn build(self) -> VectorStoreFileObject {
+        self.build_internal()
     }
 }
 

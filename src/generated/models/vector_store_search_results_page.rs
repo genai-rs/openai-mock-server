@@ -12,6 +12,7 @@ use crate::models;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, bon::Builder)]
+#[builder(state_mod = vector_store_search_results_page_builder, finish_fn(vis = "", name = build_internal))]
 pub struct VectorStoreSearchResultsPage {
     /// The object type, which is always `vector_store.search_results.page`
     #[serde(rename = "object")]
@@ -25,7 +26,7 @@ pub struct VectorStoreSearchResultsPage {
     #[serde(rename = "has_more")]
     pub has_more: bool,
     /// The token for the next page, if any.
-    #[serde(rename = "next_page", deserialize_with = "Option::deserialize")]
+    #[serde(rename = "next_page", default)]
     pub next_page: Option<String>,
 }
 
@@ -44,6 +45,20 @@ impl VectorStoreSearchResultsPage {
             has_more,
             next_page,
         }
+    }
+}
+
+impl<S: vector_store_search_results_page_builder::State> VectorStoreSearchResultsPageBuilder<S>
+where
+    S::Object: vector_store_search_results_page_builder::IsSet,
+    S::SearchQuery: vector_store_search_results_page_builder::IsSet,
+    S::Data: vector_store_search_results_page_builder::IsSet,
+    S::HasMore: vector_store_search_results_page_builder::IsSet,
+{
+    /// Finish building and return the requested object
+    #[inline(always)]
+    pub fn build(self) -> VectorStoreSearchResultsPage {
+        self.build_internal()
     }
 }
 

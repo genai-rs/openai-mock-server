@@ -13,15 +13,16 @@ use serde::{Deserialize, Serialize};
 
 /// ChatkitWorkflow : Workflow metadata and state returned for the session.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, bon::Builder)]
+#[builder(state_mod = chatkit_workflow_builder, finish_fn(vis = "", name = build_internal))]
 pub struct ChatkitWorkflow {
     /// Identifier of the workflow backing the session.
     #[serde(rename = "id")]
     pub id: String,
     /// Specific workflow version used for the session. Defaults to null when using the latest deployment.
-    #[serde(rename = "version", deserialize_with = "Option::deserialize")]
+    #[serde(rename = "version", default)]
     pub version: Option<String>,
     /// State variable key-value pairs applied when invoking the workflow. Defaults to null when no overrides were provided.
-    #[serde(rename = "state_variables", deserialize_with = "Option::deserialize")]
+    #[serde(rename = "state_variables", default)]
     pub state_variables: Option<
         std::collections::HashMap<String, Option<models::ChatkitWorkflowStateVariablesValue>>,
     >,
@@ -45,6 +46,18 @@ impl ChatkitWorkflow {
             state_variables,
             tracing,
         }
+    }
+}
+
+impl<S: chatkit_workflow_builder::State> ChatkitWorkflowBuilder<S>
+where
+    S::Id: chatkit_workflow_builder::IsSet,
+    S::Tracing: chatkit_workflow_builder::IsSet,
+{
+    /// Finish building and return the requested object
+    #[inline(always)]
+    pub fn build(self) -> ChatkitWorkflow {
+        self.build_internal()
     }
 }
 

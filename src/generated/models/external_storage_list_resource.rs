@@ -12,15 +12,16 @@ use crate::models;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, bon::Builder)]
+#[builder(state_mod = external_storage_list_resource_builder, finish_fn(vis = "", name = build_internal))]
 pub struct ExternalStorageListResource {
     /// Defaults to `\"list\"`.
     #[serde(rename = "object")]
     pub object: Object,
     #[serde(rename = "data")]
     pub data: Vec<models::ExternalStorageResponse>,
-    #[serde(rename = "first_id", deserialize_with = "Option::deserialize")]
+    #[serde(rename = "first_id", default)]
     pub first_id: Option<String>,
-    #[serde(rename = "last_id", deserialize_with = "Option::deserialize")]
+    #[serde(rename = "last_id", default)]
     pub last_id: Option<String>,
     #[serde(rename = "has_more")]
     pub has_more: bool,
@@ -41,6 +42,19 @@ impl ExternalStorageListResource {
             last_id,
             has_more,
         }
+    }
+}
+
+impl<S: external_storage_list_resource_builder::State> ExternalStorageListResourceBuilder<S>
+where
+    S::Object: external_storage_list_resource_builder::IsSet,
+    S::Data: external_storage_list_resource_builder::IsSet,
+    S::HasMore: external_storage_list_resource_builder::IsSet,
+{
+    /// Finish building and return the requested object
+    #[inline(always)]
+    pub fn build(self) -> ExternalStorageListResource {
+        self.build_internal()
     }
 }
 

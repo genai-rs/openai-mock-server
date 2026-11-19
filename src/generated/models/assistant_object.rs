@@ -13,6 +13,7 @@ use serde::{Deserialize, Serialize};
 
 /// AssistantObject : Represents an `assistant` that can call the model and use tools.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, bon::Builder)]
+#[builder(state_mod = assistant_object_builder, finish_fn(vis = "", name = build_internal))]
 pub struct AssistantObject {
     /// The identifier, which can be referenced in API endpoints.
     #[serde(rename = "id")]
@@ -26,12 +27,12 @@ pub struct AssistantObject {
     /// The name of the assistant. The maximum length is 256 characters.
     ///
     /// Validation: `maxLength: 256`.
-    #[serde(rename = "name", deserialize_with = "Option::deserialize")]
+    #[serde(rename = "name", default)]
     pub name: Option<String>,
     /// The description of the assistant. The maximum length is 512 characters.
     ///
     /// Validation: `maxLength: 512`.
-    #[serde(rename = "description", deserialize_with = "Option::deserialize")]
+    #[serde(rename = "description", default)]
     pub description: Option<String>,
     /// ID of the model to use. You can use the [List models](https://developers.openai.com/api/reference/resources/models/methods/list) API to see all of your available models, or see our [Model overview](https://developers.openai.com/api/docs/models) for descriptions of them.
     #[serde(rename = "model")]
@@ -39,7 +40,7 @@ pub struct AssistantObject {
     /// The system instructions that the assistant uses. The maximum length is 256,000 characters.
     ///
     /// Validation: `maxLength: 256000`.
-    #[serde(rename = "instructions", deserialize_with = "Option::deserialize")]
+    #[serde(rename = "instructions", default)]
     pub instructions: Option<String>,
     /// A list of tool enabled on the assistant. There can be a maximum of 128 tools per assistant. Tools can be of types `code_interpreter`, `file_search`, or `function`.  Defaults to `[]`.
     ///
@@ -54,7 +55,7 @@ pub struct AssistantObject {
     )]
     pub tool_resources: Option<Option<models::AssistantObjectToolResources>>,
     /// Set of 16 key-value pairs that can be attached to an object. This can be useful for storing additional information about the object in a structured format, and querying for objects via API or the dashboard.  Keys are strings with a maximum length of 64 characters. Values are strings with a maximum length of 512 characters.
-    #[serde(rename = "metadata", deserialize_with = "Option::deserialize")]
+    #[serde(rename = "metadata", default)]
     pub metadata: Option<std::collections::HashMap<String, String>>,
     /// What sampling temperature to use, between 0 and 2. Higher values like 0.8 will make the output more random, while lower values like 0.2 will make it more focused and deterministic.
     ///
@@ -113,6 +114,21 @@ impl AssistantObject {
             top_p: None,
             response_format: None,
         }
+    }
+}
+
+impl<S: assistant_object_builder::State> AssistantObjectBuilder<S>
+where
+    S::Id: assistant_object_builder::IsSet,
+    S::Object: assistant_object_builder::IsSet,
+    S::CreatedAt: assistant_object_builder::IsSet,
+    S::Model: assistant_object_builder::IsSet,
+    S::Tools: assistant_object_builder::IsSet,
+{
+    /// Finish building and return the requested object
+    #[inline(always)]
+    pub fn build(self) -> AssistantObject {
+        self.build_internal()
     }
 }
 

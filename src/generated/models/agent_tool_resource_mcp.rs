@@ -13,6 +13,7 @@ use serde::{Deserialize, Serialize};
 
 /// AgentToolResourceMcp : Tools provided by a remote MCP server.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, bon::Builder)]
+#[builder(state_mod = agent_tool_resource_mcp_builder, finish_fn(vis = "", name = build_internal))]
 pub struct AgentToolResourceMcp {
     /// The type of the object. Always `mcp`.  Defaults to `\"mcp\"`.
     #[serde(rename = "type")]
@@ -25,7 +26,7 @@ pub struct AgentToolResourceMcp {
     /// The attached vault credential selected for this MCP server, if any. Optional when exactly one attached credential matches the server URL.
     ///
     /// Validation: `minLength: 0`.
-    #[serde(rename = "credential_id", deserialize_with = "Option::deserialize")]
+    #[serde(rename = "credential_id", default)]
     pub credential_id: Option<String>,
     #[serde(rename = "transport")]
     pub transport: models::McpTransportResource,
@@ -37,7 +38,7 @@ pub struct AgentToolResourceMcp {
     /// The MCP tools the agent may call.
     ///
     /// Validation: `minItems: 0`, `maxItems: 2000`; each item: `minLength: 0`.
-    #[serde(rename = "allowed_tools", deserialize_with = "Option::deserialize")]
+    #[serde(rename = "allowed_tools", default)]
     pub allowed_tools: Option<Vec<String>>,
     /// Whether this MCP server must initialize before the first turn.
     #[serde(rename = "required")]
@@ -68,6 +69,22 @@ impl AgentToolResourceMcp {
             required,
             connection_origin,
         }
+    }
+}
+
+impl<S: agent_tool_resource_mcp_builder::State> AgentToolResourceMcpBuilder<S>
+where
+    S::Type: agent_tool_resource_mcp_builder::IsSet,
+    S::ServerLabel: agent_tool_resource_mcp_builder::IsSet,
+    S::Transport: agent_tool_resource_mcp_builder::IsSet,
+    S::RequestMetadata: agent_tool_resource_mcp_builder::IsSet,
+    S::Required: agent_tool_resource_mcp_builder::IsSet,
+    S::ConnectionOrigin: agent_tool_resource_mcp_builder::IsSet,
+{
+    /// Finish building and return the requested object
+    #[inline(always)]
+    pub fn build(self) -> AgentToolResourceMcp {
+        self.build_internal()
     }
 }
 

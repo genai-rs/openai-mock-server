@@ -13,6 +13,7 @@ use serde::{Deserialize, Serialize};
 
 /// Eval : An Eval object with a data source config and testing criteria. An Eval represents a task to be done for your LLM integration. Like:  - Improve the quality of my chatbot  - See how well my chatbot handles customer support  - Compare how different models perform on the same task
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, bon::Builder)]
+#[builder(state_mod = eval_builder, finish_fn(vis = "", name = build_internal))]
 pub struct Eval {
     /// The object type.  Defaults to `\"eval\"`.
     #[serde(rename = "object")]
@@ -32,7 +33,7 @@ pub struct Eval {
     #[serde(rename = "created_at", with = "super::unix_time")]
     pub created_at: jiff::Timestamp,
     /// Set of 16 key-value pairs that can be attached to an object. This can be useful for storing additional information about the object in a structured format, and querying for objects via API or the dashboard.  Keys are strings with a maximum length of 64 characters. Values are strings with a maximum length of 512 characters.
-    #[serde(rename = "metadata", deserialize_with = "Option::deserialize")]
+    #[serde(rename = "metadata", default)]
     pub metadata: Option<std::collections::HashMap<String, String>>,
 }
 
@@ -56,6 +57,22 @@ impl Eval {
             created_at,
             metadata,
         }
+    }
+}
+
+impl<S: eval_builder::State> EvalBuilder<S>
+where
+    S::Object: eval_builder::IsSet,
+    S::Id: eval_builder::IsSet,
+    S::Name: eval_builder::IsSet,
+    S::DataSourceConfig: eval_builder::IsSet,
+    S::TestingCriteria: eval_builder::IsSet,
+    S::CreatedAt: eval_builder::IsSet,
+{
+    /// Finish building and return the requested object
+    #[inline(always)]
+    pub fn build(self) -> Eval {
+        self.build_internal()
     }
 }
 

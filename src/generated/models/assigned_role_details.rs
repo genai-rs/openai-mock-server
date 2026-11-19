@@ -13,6 +13,7 @@ use serde::{Deserialize, Serialize};
 
 /// AssignedRoleDetails : Detailed information about a role assignment entry returned when listing assignments.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, bon::Builder)]
+#[builder(state_mod = assigned_role_details_builder, finish_fn(vis = "", name = build_internal))]
 pub struct AssignedRoleDetails {
     /// Identifier for the role.
     #[serde(rename = "id")]
@@ -30,31 +31,25 @@ pub struct AssignedRoleDetails {
     #[serde(rename = "predefined_role")]
     pub predefined_role: bool,
     /// Description of the role.
-    #[serde(rename = "description", deserialize_with = "Option::deserialize")]
+    #[serde(rename = "description", default)]
     pub description: Option<String>,
     /// When the role was created.
-    #[serde(rename = "created_at", with = "super::unix_time::option")]
+    #[serde(rename = "created_at", default, with = "super::unix_time::option")]
     pub created_at: Option<jiff::Timestamp>,
     /// When the role was last updated.
-    #[serde(rename = "updated_at", with = "super::unix_time::option")]
+    #[serde(rename = "updated_at", default, with = "super::unix_time::option")]
     pub updated_at: Option<jiff::Timestamp>,
     /// Identifier of the actor who created the role.
-    #[serde(rename = "created_by", deserialize_with = "Option::deserialize")]
+    #[serde(rename = "created_by", default)]
     pub created_by: Option<String>,
     /// User details for the actor that created the role, when available.
-    #[serde(
-        rename = "created_by_user_obj",
-        deserialize_with = "Option::deserialize"
-    )]
+    #[serde(rename = "created_by_user_obj", default)]
     pub created_by_user_obj: Option<std::collections::HashMap<String, serde_json::Value>>,
     /// Arbitrary metadata stored on the role.
-    #[serde(rename = "metadata", deserialize_with = "Option::deserialize")]
+    #[serde(rename = "metadata", default)]
     pub metadata: Option<std::collections::HashMap<String, serde_json::Value>>,
     /// Principals from which the role assignment is inherited, when available.
-    #[serde(
-        rename = "assignment_sources",
-        deserialize_with = "Option::deserialize"
-    )]
+    #[serde(rename = "assignment_sources", default)]
     pub assignment_sources: Option<Vec<models::AssignedRoleDetailsAssignmentSourcesInner>>,
 }
 
@@ -88,6 +83,21 @@ impl AssignedRoleDetails {
             metadata,
             assignment_sources,
         }
+    }
+}
+
+impl<S: assigned_role_details_builder::State> AssignedRoleDetailsBuilder<S>
+where
+    S::Id: assigned_role_details_builder::IsSet,
+    S::Name: assigned_role_details_builder::IsSet,
+    S::Permissions: assigned_role_details_builder::IsSet,
+    S::ResourceType: assigned_role_details_builder::IsSet,
+    S::PredefinedRole: assigned_role_details_builder::IsSet,
+{
+    /// Finish building and return the requested object
+    #[inline(always)]
+    pub fn build(self) -> AssignedRoleDetails {
+        self.build_internal()
     }
 }
 

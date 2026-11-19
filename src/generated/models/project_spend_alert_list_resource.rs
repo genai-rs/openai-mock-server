@@ -13,6 +13,7 @@ use serde::{Deserialize, Serialize};
 
 /// ProjectSpendAlertListResource : Paginated list of project spend alerts.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, bon::Builder)]
+#[builder(state_mod = project_spend_alert_list_resource_builder, finish_fn(vis = "", name = build_internal))]
 pub struct ProjectSpendAlertListResource {
     /// Always `list`.
     #[serde(rename = "object")]
@@ -21,10 +22,10 @@ pub struct ProjectSpendAlertListResource {
     #[serde(rename = "data")]
     pub data: Vec<models::ProjectSpendAlert>,
     /// The ID of the first spend alert in this page.
-    #[serde(rename = "first_id", deserialize_with = "Option::deserialize")]
+    #[serde(rename = "first_id", default)]
     pub first_id: Option<String>,
     /// The ID of the last spend alert in this page.
-    #[serde(rename = "last_id", deserialize_with = "Option::deserialize")]
+    #[serde(rename = "last_id", default)]
     pub last_id: Option<String>,
     /// Whether more spend alerts are available when paginating.
     #[serde(rename = "has_more")]
@@ -47,6 +48,19 @@ impl ProjectSpendAlertListResource {
             last_id,
             has_more,
         }
+    }
+}
+
+impl<S: project_spend_alert_list_resource_builder::State> ProjectSpendAlertListResourceBuilder<S>
+where
+    S::Object: project_spend_alert_list_resource_builder::IsSet,
+    S::Data: project_spend_alert_list_resource_builder::IsSet,
+    S::HasMore: project_spend_alert_list_resource_builder::IsSet,
+{
+    /// Finish building and return the requested object
+    #[inline(always)]
+    pub fn build(self) -> ProjectSpendAlertListResource {
+        self.build_internal()
     }
 }
 

@@ -12,6 +12,7 @@ use serde::{Deserialize, Serialize};
 
 /// LiveCommentaryAppendParam : Provide context the Live model can communicate to the user, optionally for an existing client delegation. Rejected while an audio fixture is active.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, bon::Builder)]
+#[builder(state_mod = live_commentary_append_param_builder, finish_fn(vis = "", name = build_internal))]
 pub struct LiveCommentaryAppendParam {
     /// Optional client identifier for correlating this command with a server event's client_event_id or error.client_event_id.
     ///
@@ -29,7 +30,7 @@ pub struct LiveCommentaryAppendParam {
     /// Required, nullable. Set null for general session context, or use the ID from session.delegation.created for an existing client delegation. Non-null IDs are not accepted with Responses delegation.
     ///
     /// Validation: `minLength: 1`.
-    #[serde(rename = "delegation_id", deserialize_with = "Option::deserialize")]
+    #[serde(rename = "delegation_id", default)]
     pub delegation_id: Option<String>,
     /// Speakable context for the Live model, limited to 500 tokens. Use this for a result the model should communicate; use session.thinking.append for silent context.
     #[serde(rename = "content")]
@@ -49,6 +50,18 @@ impl LiveCommentaryAppendParam {
             delegation_id,
             content,
         }
+    }
+}
+
+impl<S: live_commentary_append_param_builder::State> LiveCommentaryAppendParamBuilder<S>
+where
+    S::Type: live_commentary_append_param_builder::IsSet,
+    S::Content: live_commentary_append_param_builder::IsSet,
+{
+    /// Finish building and return the requested object
+    #[inline(always)]
+    pub fn build(self) -> LiveCommentaryAppendParam {
+        self.build_internal()
     }
 }
 

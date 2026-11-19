@@ -12,6 +12,7 @@ use crate::models;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, bon::Builder)]
+#[builder(state_mod = vector_store_search_result_item_builder, finish_fn(vis = "", name = build_internal))]
 pub struct VectorStoreSearchResultItem {
     /// The ID of the vector store file.
     #[serde(rename = "file_id")]
@@ -27,7 +28,7 @@ pub struct VectorStoreSearchResultItem {
     /// Set of 16 key-value pairs that can be attached to an object. This can be useful for storing additional information about the object in a structured format, and querying for objects via API or the dashboard. Keys are strings with a maximum length of 64 characters. Values are strings with a maximum length of 512 characters, booleans, or numbers.
     ///
     /// Validation: `maxProperties: 16`.
-    #[serde(rename = "attributes", deserialize_with = "Option::deserialize")]
+    #[serde(rename = "attributes", default)]
     pub attributes:
         Option<std::collections::HashMap<String, models::VectorStoreFileAttributesValue>>,
     /// Content chunks from the file.
@@ -52,6 +53,20 @@ impl VectorStoreSearchResultItem {
             attributes,
             content,
         }
+    }
+}
+
+impl<S: vector_store_search_result_item_builder::State> VectorStoreSearchResultItemBuilder<S>
+where
+    S::FileId: vector_store_search_result_item_builder::IsSet,
+    S::Filename: vector_store_search_result_item_builder::IsSet,
+    S::Score: vector_store_search_result_item_builder::IsSet,
+    S::Content: vector_store_search_result_item_builder::IsSet,
+{
+    /// Finish building and return the requested object
+    #[inline(always)]
+    pub fn build(self) -> VectorStoreSearchResultItem {
+        self.build_internal()
     }
 }
 

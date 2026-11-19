@@ -13,6 +13,7 @@ use serde::{Deserialize, Serialize};
 
 /// OrganizationCertificate : Represents an individual certificate configured at the organization level.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, bon::Builder)]
+#[builder(state_mod = organization_certificate_builder, finish_fn(vis = "", name = build_internal))]
 pub struct OrganizationCertificate {
     /// The object type, which is always `organization.certificate`.
     #[serde(rename = "object")]
@@ -21,7 +22,7 @@ pub struct OrganizationCertificate {
     #[serde(rename = "id")]
     pub id: String,
     /// The name of the certificate.
-    #[serde(rename = "name", deserialize_with = "Option::deserialize")]
+    #[serde(rename = "name", default)]
     pub name: Option<String>,
     /// The Unix timestamp (in seconds) of when the certificate was uploaded.
     #[serde(rename = "created_at", with = "super::unix_time")]
@@ -51,6 +52,21 @@ impl OrganizationCertificate {
             certificate_details,
             active,
         }
+    }
+}
+
+impl<S: organization_certificate_builder::State> OrganizationCertificateBuilder<S>
+where
+    S::Object: organization_certificate_builder::IsSet,
+    S::Id: organization_certificate_builder::IsSet,
+    S::CreatedAt: organization_certificate_builder::IsSet,
+    S::CertificateDetails: organization_certificate_builder::IsSet,
+    S::Active: organization_certificate_builder::IsSet,
+{
+    /// Finish building and return the requested object
+    #[inline(always)]
+    pub fn build(self) -> OrganizationCertificate {
+        self.build_internal()
     }
 }
 

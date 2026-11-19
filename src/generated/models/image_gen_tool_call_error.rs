@@ -12,9 +12,10 @@ use crate::models;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, bon::Builder)]
+#[builder(state_mod = image_gen_tool_call_error_builder, finish_fn(vis = "", name = build_internal))]
 pub struct ImageGenToolCallError {
     /// The error code.
-    #[serde(rename = "code", deserialize_with = "Option::deserialize")]
+    #[serde(rename = "code", default)]
     pub code: Option<String>,
     /// The error type.
     #[serde(rename = "type")]
@@ -23,7 +24,7 @@ pub struct ImageGenToolCallError {
     #[serde(rename = "message")]
     pub message: String,
     /// The related request parameter.
-    #[serde(rename = "param", deserialize_with = "Option::deserialize")]
+    #[serde(rename = "param", default)]
     pub param: Option<String>,
     #[serde(rename = "moderation_details", skip_serializing_if = "Option::is_none")]
     pub moderation_details: Option<models::ImageGenToolCallModerationDetails>,
@@ -43,6 +44,18 @@ impl ImageGenToolCallError {
             param,
             moderation_details: None,
         }
+    }
+}
+
+impl<S: image_gen_tool_call_error_builder::State> ImageGenToolCallErrorBuilder<S>
+where
+    S::Type: image_gen_tool_call_error_builder::IsSet,
+    S::Message: image_gen_tool_call_error_builder::IsSet,
+{
+    /// Finish building and return the requested object
+    #[inline(always)]
+    pub fn build(self) -> ImageGenToolCallError {
+        self.build_internal()
     }
 }
 

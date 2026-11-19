@@ -13,6 +13,7 @@ use serde::{Deserialize, Serialize};
 
 /// AutomationInvocationResource : One attempted delivery by an automation.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, bon::Builder)]
+#[builder(state_mod = automation_invocation_resource_builder, finish_fn(vis = "", name = build_internal))]
 pub struct AutomationInvocationResource {
     /// The invocation ID.
     ///
@@ -33,20 +34,20 @@ pub struct AutomationInvocationResource {
     #[serde(rename = "source")]
     pub source: models::AutomationInvocationSourceResource,
     /// The intended occurrence as a Unix timestamp in seconds, or null for manual runs.
-    #[serde(rename = "scheduled_at", deserialize_with = "Option::deserialize")]
+    #[serde(rename = "scheduled_at", default)]
     pub scheduled_at: Option<i64>,
     /// The target or newly created session ID, or null before one is available.
     ///
     /// Validation: `minLength: 0`.
-    #[serde(rename = "session_id", deserialize_with = "Option::deserialize")]
+    #[serde(rename = "session_id", default)]
     pub session_id: Option<String>,
     #[serde(rename = "status")]
     pub status: models::AutomationInvocationStatusResource,
     /// Why an occurrence was skipped, or null when it was not skipped.  Defaults to `\"pending_delivery\"`.
-    #[serde(rename = "skip_reason", deserialize_with = "Option::deserialize")]
+    #[serde(rename = "skip_reason", default)]
     pub skip_reason: Option<SkipReason>,
     /// The permanent delivery failure, or null when no failure occurred.
-    #[serde(rename = "error", deserialize_with = "Option::deserialize")]
+    #[serde(rename = "error", default)]
     pub error: Option<models::AutomationInvocationErrorResource>,
 }
 
@@ -76,6 +77,22 @@ impl AutomationInvocationResource {
             skip_reason,
             error,
         }
+    }
+}
+
+impl<S: automation_invocation_resource_builder::State> AutomationInvocationResourceBuilder<S>
+where
+    S::Id: automation_invocation_resource_builder::IsSet,
+    S::Object: automation_invocation_resource_builder::IsSet,
+    S::AutomationId: automation_invocation_resource_builder::IsSet,
+    S::CreatedAt: automation_invocation_resource_builder::IsSet,
+    S::Source: automation_invocation_resource_builder::IsSet,
+    S::Status: automation_invocation_resource_builder::IsSet,
+{
+    /// Finish building and return the requested object
+    #[inline(always)]
+    pub fn build(self) -> AutomationInvocationResource {
+        self.build_internal()
     }
 }
 

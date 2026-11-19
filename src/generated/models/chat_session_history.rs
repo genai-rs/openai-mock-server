@@ -12,12 +12,13 @@ use serde::{Deserialize, Serialize};
 
 /// ChatSessionHistory : History retention preferences returned for the session.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, bon::Builder)]
+#[builder(state_mod = chat_session_history_builder, finish_fn(vis = "", name = build_internal))]
 pub struct ChatSessionHistory {
     /// Indicates if chat history is persisted for the session.
     #[serde(rename = "enabled")]
     pub enabled: bool,
     /// Number of prior threads surfaced in history views. Defaults to null when all history is retained.
-    #[serde(rename = "recent_threads", deserialize_with = "Option::deserialize")]
+    #[serde(rename = "recent_threads", default)]
     pub recent_threads: Option<i64>,
 }
 
@@ -28,6 +29,17 @@ impl ChatSessionHistory {
             enabled,
             recent_threads,
         }
+    }
+}
+
+impl<S: chat_session_history_builder::State> ChatSessionHistoryBuilder<S>
+where
+    S::Enabled: chat_session_history_builder::IsSet,
+{
+    /// Finish building and return the requested object
+    #[inline(always)]
+    pub fn build(self) -> ChatSessionHistory {
+        self.build_internal()
     }
 }
 

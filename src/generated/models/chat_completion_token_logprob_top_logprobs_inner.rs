@@ -11,6 +11,7 @@
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, bon::Builder)]
+#[builder(state_mod = chat_completion_token_logprob_top_logprobs_inner_builder, finish_fn(vis = "", name = build_internal))]
 pub struct ChatCompletionTokenLogprobTopLogprobsInner {
     /// The token.
     #[serde(rename = "token")]
@@ -19,7 +20,7 @@ pub struct ChatCompletionTokenLogprobTopLogprobsInner {
     #[serde(rename = "logprob")]
     pub logprob: f64,
     /// A list of integers representing the UTF-8 bytes representation of the token. Useful in instances where characters are represented by multiple tokens and their byte representations must be combined to generate the correct text representation. Can be `null` if there is no bytes representation for the token.
-    #[serde(rename = "bytes", deserialize_with = "Option::deserialize")]
+    #[serde(rename = "bytes", default)]
     pub bytes: Option<Vec<i64>>,
 }
 
@@ -34,6 +35,19 @@ impl ChatCompletionTokenLogprobTopLogprobsInner {
             logprob,
             bytes,
         }
+    }
+}
+
+impl<S: chat_completion_token_logprob_top_logprobs_inner_builder::State>
+    ChatCompletionTokenLogprobTopLogprobsInnerBuilder<S>
+where
+    S::Token: chat_completion_token_logprob_top_logprobs_inner_builder::IsSet,
+    S::Logprob: chat_completion_token_logprob_top_logprobs_inner_builder::IsSet,
+{
+    /// Finish building and return the requested object
+    #[inline(always)]
+    pub fn build(self) -> ChatCompletionTokenLogprobTopLogprobsInner {
+        self.build_internal()
     }
 }
 

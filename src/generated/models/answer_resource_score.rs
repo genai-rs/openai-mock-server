@@ -12,12 +12,13 @@ use crate::models;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, bon::Builder)]
+#[builder(state_mod = answer_resource_score_builder, finish_fn(vis = "", name = build_internal))]
 pub struct AnswerResourceScore {
     /// The type of the object. Always `score`.  Defaults to `\"score\"`.
     #[serde(rename = "type")]
     pub r#type: Type,
     /// Validation: `minLength: 0`.
-    #[serde(rename = "name", deserialize_with = "Option::deserialize")]
+    #[serde(rename = "name", default)]
     pub name: Option<String>,
     #[serde(rename = "score")]
     pub score: f64,
@@ -43,6 +44,20 @@ impl AnswerResourceScore {
             probabilities,
             confidence,
         }
+    }
+}
+
+impl<S: answer_resource_score_builder::State> AnswerResourceScoreBuilder<S>
+where
+    S::Type: answer_resource_score_builder::IsSet,
+    S::Score: answer_resource_score_builder::IsSet,
+    S::Probabilities: answer_resource_score_builder::IsSet,
+    S::Confidence: answer_resource_score_builder::IsSet,
+{
+    /// Finish building and return the requested object
+    #[inline(always)]
+    pub fn build(self) -> AnswerResourceScore {
+        self.build_internal()
     }
 }
 

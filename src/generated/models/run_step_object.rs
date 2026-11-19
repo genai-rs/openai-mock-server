@@ -13,6 +13,7 @@ use serde::{Deserialize, Serialize};
 
 /// RunStepObject : Represents a step in execution of a run.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, bon::Builder)]
+#[builder(state_mod = run_step_object_builder, finish_fn(vis = "", name = build_internal))]
 pub struct RunStepObject {
     /// The identifier of the run step, which can be referenced in API endpoints.
     #[serde(rename = "id")]
@@ -40,24 +41,24 @@ pub struct RunStepObject {
     pub status: Status,
     #[serde(rename = "step_details")]
     pub step_details: models::RunStepObjectStepDetails,
-    #[serde(rename = "last_error", deserialize_with = "Option::deserialize")]
+    #[serde(rename = "last_error", default)]
     pub last_error: Option<models::RunStepObjectLastError>,
     /// The Unix timestamp (in seconds) for when the run step expired. A step is considered expired if the parent run is expired.
-    #[serde(rename = "expired_at", with = "super::unix_time::option")]
+    #[serde(rename = "expired_at", default, with = "super::unix_time::option")]
     pub expired_at: Option<jiff::Timestamp>,
     /// The Unix timestamp (in seconds) for when the run step was cancelled.
-    #[serde(rename = "cancelled_at", with = "super::unix_time::option")]
+    #[serde(rename = "cancelled_at", default, with = "super::unix_time::option")]
     pub cancelled_at: Option<jiff::Timestamp>,
     /// The Unix timestamp (in seconds) for when the run step failed.
-    #[serde(rename = "failed_at", with = "super::unix_time::option")]
+    #[serde(rename = "failed_at", default, with = "super::unix_time::option")]
     pub failed_at: Option<jiff::Timestamp>,
     /// The Unix timestamp (in seconds) for when the run step completed.
-    #[serde(rename = "completed_at", with = "super::unix_time::option")]
+    #[serde(rename = "completed_at", default, with = "super::unix_time::option")]
     pub completed_at: Option<jiff::Timestamp>,
     /// Set of 16 key-value pairs that can be attached to an object. This can be useful for storing additional information about the object in a structured format, and querying for objects via API or the dashboard.  Keys are strings with a maximum length of 64 characters. Values are strings with a maximum length of 512 characters.
-    #[serde(rename = "metadata", deserialize_with = "Option::deserialize")]
+    #[serde(rename = "metadata", default)]
     pub metadata: Option<std::collections::HashMap<String, String>>,
-    #[serde(rename = "usage", deserialize_with = "Option::deserialize")]
+    #[serde(rename = "usage", default)]
     pub usage: Option<models::RunStepCompletionUsage>,
 }
 
@@ -99,6 +100,25 @@ impl RunStepObject {
             metadata,
             usage,
         }
+    }
+}
+
+impl<S: run_step_object_builder::State> RunStepObjectBuilder<S>
+where
+    S::Id: run_step_object_builder::IsSet,
+    S::Object: run_step_object_builder::IsSet,
+    S::CreatedAt: run_step_object_builder::IsSet,
+    S::AssistantId: run_step_object_builder::IsSet,
+    S::ThreadId: run_step_object_builder::IsSet,
+    S::RunId: run_step_object_builder::IsSet,
+    S::Type: run_step_object_builder::IsSet,
+    S::Status: run_step_object_builder::IsSet,
+    S::StepDetails: run_step_object_builder::IsSet,
+{
+    /// Finish building and return the requested object
+    #[inline(always)]
+    pub fn build(self) -> RunStepObject {
+        self.build_internal()
     }
 }
 

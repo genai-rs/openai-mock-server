@@ -13,6 +13,7 @@ use serde::{Deserialize, Serialize};
 
 /// MessageItemResource : A user or assistant message recorded in a session.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, bon::Builder)]
+#[builder(state_mod = message_item_resource_builder, finish_fn(vis = "", name = build_internal))]
 pub struct MessageItemResource {
     /// The item type. Always `message`.  Defaults to `\"message\"`.
     #[serde(rename = "type")]
@@ -20,7 +21,7 @@ pub struct MessageItemResource {
     /// The ID of this item, or null for legacy user messages whose ID was not recorded.
     ///
     /// Validation: `minLength: 0`.
-    #[serde(rename = "id", deserialize_with = "Option::deserialize")]
+    #[serde(rename = "id", default)]
     pub id: Option<String>,
     /// The ID of the turn that contains this item.
     ///
@@ -37,7 +38,7 @@ pub struct MessageItemResource {
     #[serde(rename = "status")]
     pub status: models::OutputItemStatusResource,
     /// The phase of an assistant message. Null for user messages.
-    #[serde(rename = "phase", deserialize_with = "Option::deserialize")]
+    #[serde(rename = "phase", default)]
     pub phase: Option<models::MessagePhaseResource>,
 }
 
@@ -61,6 +62,21 @@ impl MessageItemResource {
             status,
             phase,
         }
+    }
+}
+
+impl<S: message_item_resource_builder::State> MessageItemResourceBuilder<S>
+where
+    S::Type: message_item_resource_builder::IsSet,
+    S::TurnId: message_item_resource_builder::IsSet,
+    S::Role: message_item_resource_builder::IsSet,
+    S::Content: message_item_resource_builder::IsSet,
+    S::Status: message_item_resource_builder::IsSet,
+{
+    /// Finish building and return the requested object
+    #[inline(always)]
+    pub fn build(self) -> MessageItemResource {
+        self.build_internal()
     }
 }
 

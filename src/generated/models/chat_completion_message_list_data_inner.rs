@@ -12,14 +12,15 @@ use crate::models;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, bon::Builder)]
+#[builder(state_mod = chat_completion_message_list_data_inner_builder, finish_fn(vis = "", name = build_internal))]
 pub struct ChatCompletionMessageListDataInner {
     #[serde(rename = "id")]
     pub id: String,
     #[serde(rename = "role")]
     pub role: Role,
-    #[serde(rename = "content", deserialize_with = "Option::deserialize")]
+    #[serde(rename = "content", default)]
     pub content: Option<String>,
-    #[serde(rename = "content_parts", deserialize_with = "Option::deserialize")]
+    #[serde(rename = "content_parts", default)]
     pub content_parts: Option<Vec<models::ChatCompletionMessageListDataInnerContentPartsInner>>,
     #[serde(
         rename = "name",
@@ -44,6 +45,19 @@ impl ChatCompletionMessageListDataInner {
             content_parts,
             name: None,
         }
+    }
+}
+
+impl<S: chat_completion_message_list_data_inner_builder::State>
+    ChatCompletionMessageListDataInnerBuilder<S>
+where
+    S::Id: chat_completion_message_list_data_inner_builder::IsSet,
+    S::Role: chat_completion_message_list_data_inner_builder::IsSet,
+{
+    /// Finish building and return the requested object
+    #[inline(always)]
+    pub fn build(self) -> ChatCompletionMessageListDataInner {
+        self.build_internal()
     }
 }
 

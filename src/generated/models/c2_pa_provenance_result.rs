@@ -12,6 +12,7 @@ use crate::models;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, bon::Builder)]
+#[builder(state_mod = c2_pa_provenance_result_builder, finish_fn(vis = "", name = build_internal))]
 pub struct C2PaProvenanceResult {
     /// The provenance signal type. Always `c2pa`.  Defaults to `\"c2pa\"`.
     #[serde(rename = "type")]
@@ -21,13 +22,13 @@ pub struct C2PaProvenanceResult {
     #[serde(rename = "validation_state")]
     pub validation_state: models::C2PaValidationStateApi,
     /// The C2PA manifest issuer, when available.
-    #[serde(rename = "issuer", deserialize_with = "Option::deserialize")]
+    #[serde(rename = "issuer", default)]
     pub issuer: Option<String>,
     /// ID of the model to use
     #[serde(rename = "model")]
     pub model: String,
     /// The UTC RFC 3339 timestamp recorded by the provenance signal for when the asset was generated, when available.
-    #[serde(rename = "generated_at", deserialize_with = "Option::deserialize")]
+    #[serde(rename = "generated_at", default)]
     pub generated_at: Option<String>,
 }
 
@@ -48,6 +49,20 @@ impl C2PaProvenanceResult {
             model,
             generated_at,
         }
+    }
+}
+
+impl<S: c2_pa_provenance_result_builder::State> C2PaProvenanceResultBuilder<S>
+where
+    S::Type: c2_pa_provenance_result_builder::IsSet,
+    S::Outcome: c2_pa_provenance_result_builder::IsSet,
+    S::ValidationState: c2_pa_provenance_result_builder::IsSet,
+    S::Model: c2_pa_provenance_result_builder::IsSet,
+{
+    /// Finish building and return the requested object
+    #[inline(always)]
+    pub fn build(self) -> C2PaProvenanceResult {
+        self.build_internal()
     }
 }
 

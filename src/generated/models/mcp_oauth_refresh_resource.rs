@@ -13,6 +13,7 @@ use serde::{Deserialize, Serialize};
 
 /// McpOauthRefreshResource : Configuration used to refresh an MCP OAuth access token, excluding secret values.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, bon::Builder)]
+#[builder(state_mod = mcp_oauth_refresh_resource_builder, finish_fn(vis = "", name = build_internal))]
 pub struct McpOauthRefreshResource {
     /// The HTTPS OAuth token endpoint used for refresh.
     ///
@@ -27,12 +28,12 @@ pub struct McpOauthRefreshResource {
     /// The resource URI sent to the OAuth token endpoint during refresh, if configured.
     ///
     /// Validation: `minLength: 0`.
-    #[serde(rename = "resource", deserialize_with = "Option::deserialize")]
+    #[serde(rename = "resource", default)]
     pub resource: Option<String>,
     /// Space-separated OAuth scopes requested during refresh, if configured.
     ///
     /// Validation: `minLength: 0`.
-    #[serde(rename = "scope", deserialize_with = "Option::deserialize")]
+    #[serde(rename = "scope", default)]
     pub scope: Option<String>,
     #[serde(rename = "token_endpoint_auth")]
     pub token_endpoint_auth: models::McpOauthTokenEndpointAuthResource,
@@ -54,6 +55,19 @@ impl McpOauthRefreshResource {
             scope,
             token_endpoint_auth,
         }
+    }
+}
+
+impl<S: mcp_oauth_refresh_resource_builder::State> McpOauthRefreshResourceBuilder<S>
+where
+    S::TokenEndpoint: mcp_oauth_refresh_resource_builder::IsSet,
+    S::ClientId: mcp_oauth_refresh_resource_builder::IsSet,
+    S::TokenEndpointAuth: mcp_oauth_refresh_resource_builder::IsSet,
+{
+    /// Finish building and return the requested object
+    #[inline(always)]
+    pub fn build(self) -> McpOauthRefreshResource {
+        self.build_internal()
     }
 }
 
