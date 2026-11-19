@@ -12,26 +12,27 @@ use serde::{Deserialize, Serialize};
 
 /// WebSearchLocationResource : Approximate user location used to localize web search results.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, bon::Builder)]
+#[builder(state_mod = web_search_location_resource_builder, finish_fn(vis = "", name = build_internal))]
 pub struct WebSearchLocationResource {
     /// The two-letter ISO country code, such as `US`.
     ///
     /// Validation: `minLength: 0`.
-    #[serde(rename = "country", deserialize_with = "Option::deserialize")]
+    #[serde(rename = "country", default)]
     pub country: Option<String>,
     /// The region or state name.
     ///
     /// Validation: `minLength: 0`.
-    #[serde(rename = "region", deserialize_with = "Option::deserialize")]
+    #[serde(rename = "region", default)]
     pub region: Option<String>,
     /// The city name.
     ///
     /// Validation: `minLength: 0`.
-    #[serde(rename = "city", deserialize_with = "Option::deserialize")]
+    #[serde(rename = "city", default)]
     pub city: Option<String>,
     /// The IANA timezone, such as `America/Los_Angeles`.
     ///
     /// Validation: `minLength: 0`.
-    #[serde(rename = "timezone", deserialize_with = "Option::deserialize")]
+    #[serde(rename = "timezone", default)]
     pub timezone: Option<String>,
 }
 
@@ -49,6 +50,14 @@ impl WebSearchLocationResource {
             city,
             timezone,
         }
+    }
+}
+
+impl<S: web_search_location_resource_builder::State> WebSearchLocationResourceBuilder<S> {
+    /// Finish building and return the requested object
+    #[inline(always)]
+    pub fn build(self) -> WebSearchLocationResource {
+        self.build_internal()
     }
 }
 

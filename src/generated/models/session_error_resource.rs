@@ -12,6 +12,7 @@ use serde::{Deserialize, Serialize};
 
 /// SessionErrorResource : An error payload with the same public fields as Responses API streaming errors.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, bon::Builder)]
+#[builder(state_mod = session_error_resource_builder, finish_fn(vis = "", name = build_internal))]
 pub struct SessionErrorResource {
     /// The error type.
     ///
@@ -21,7 +22,7 @@ pub struct SessionErrorResource {
     /// The machine-readable error code, if any.
     ///
     /// Validation: `minLength: 0`.
-    #[serde(rename = "code", deserialize_with = "Option::deserialize")]
+    #[serde(rename = "code", default)]
     pub code: Option<String>,
     /// A customer-safe explanation of the error.
     ///
@@ -31,7 +32,7 @@ pub struct SessionErrorResource {
     /// The request parameter associated with the error, if any.
     ///
     /// Validation: `minLength: 0`.
-    #[serde(rename = "param", deserialize_with = "Option::deserialize")]
+    #[serde(rename = "param", default)]
     pub param: Option<String>,
 }
 
@@ -49,6 +50,18 @@ impl SessionErrorResource {
             message,
             param,
         }
+    }
+}
+
+impl<S: session_error_resource_builder::State> SessionErrorResourceBuilder<S>
+where
+    S::Type: session_error_resource_builder::IsSet,
+    S::Message: session_error_resource_builder::IsSet,
+{
+    /// Finish building and return the requested object
+    #[inline(always)]
+    pub fn build(self) -> SessionErrorResource {
+        self.build_internal()
     }
 }
 

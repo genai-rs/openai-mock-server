@@ -12,12 +12,13 @@ use crate::models;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, bon::Builder)]
+#[builder(state_mod = beta_error_builder, finish_fn(vis = "", name = build_internal))]
 pub struct BetaError {
-    #[serde(rename = "code", deserialize_with = "Option::deserialize")]
+    #[serde(rename = "code", default)]
     pub code: Option<String>,
     #[serde(rename = "message")]
     pub message: String,
-    #[serde(rename = "param", deserialize_with = "Option::deserialize")]
+    #[serde(rename = "param", default)]
     pub param: Option<String>,
     #[serde(rename = "type")]
     pub r#type: String,
@@ -39,6 +40,18 @@ impl BetaError {
             r#type,
             misalignment: None,
         }
+    }
+}
+
+impl<S: beta_error_builder::State> BetaErrorBuilder<S>
+where
+    S::Message: beta_error_builder::IsSet,
+    S::Type: beta_error_builder::IsSet,
+{
+    /// Finish building and return the requested object
+    #[inline(always)]
+    pub fn build(self) -> BetaError {
+        self.build_internal()
     }
 }
 

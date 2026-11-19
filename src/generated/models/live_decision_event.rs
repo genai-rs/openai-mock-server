@@ -13,6 +13,7 @@ use serde::{Deserialize, Serialize};
 
 /// LiveDecisionEvent : A Decision API event for a Live delegation or transcript trigger. For a trigger, source_event_id identifies the transcript delta that caused this evaluation.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, bon::Builder)]
+#[builder(state_mod = live_decision_event_builder, finish_fn(vis = "", name = build_internal))]
 pub struct LiveDecisionEvent {
     /// Defaults to `\"decision.event\"`.
     #[serde(rename = "type")]
@@ -21,15 +22,15 @@ pub struct LiveDecisionEvent {
     #[serde(rename = "event_id")]
     pub event_id: String,
     /// The Live delegation ID, or null for a transcript trigger.
-    #[serde(rename = "delegation_id", deserialize_with = "Option::deserialize")]
+    #[serde(rename = "delegation_id", default)]
     pub delegation_id: Option<String>,
     /// The Live-assigned ID of this trigger firing, or null for a delegation.
-    #[serde(rename = "trigger_id", deserialize_with = "Option::deserialize")]
+    #[serde(rename = "trigger_id", default)]
     pub trigger_id: Option<String>,
-    #[serde(rename = "source_event_type", deserialize_with = "Option::deserialize")]
+    #[serde(rename = "source_event_type", default)]
     pub source_event_type: Option<SourceEventType>,
     /// The event_id of the transcript delta that fired this trigger, or null for a delegation.
-    #[serde(rename = "source_event_id", deserialize_with = "Option::deserialize")]
+    #[serde(rename = "source_event_id", default)]
     pub source_event_id: Option<String>,
     #[serde(rename = "event")]
     pub event: models::LiveDecisionCompleted,
@@ -55,6 +56,19 @@ impl LiveDecisionEvent {
             source_event_id,
             event,
         }
+    }
+}
+
+impl<S: live_decision_event_builder::State> LiveDecisionEventBuilder<S>
+where
+    S::Type: live_decision_event_builder::IsSet,
+    S::EventId: live_decision_event_builder::IsSet,
+    S::Event: live_decision_event_builder::IsSet,
+{
+    /// Finish building and return the requested object
+    #[inline(always)]
+    pub fn build(self) -> LiveDecisionEvent {
+        self.build_internal()
     }
 }
 

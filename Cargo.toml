@@ -29,7 +29,7 @@ serde = { version = "^1.0", features = ["derive"] }
 serde_json = "^1.0"
 serde_repr = "^0.1"
 serde_with = { version = "^3.8", default-features = false, features = ["base64", "std", "macros"], optional = true }
-timvw-rust-runtime = { version = "^0.4", default-features = false, features = ["fs"], optional = true }
+timvw-rust-runtime = { version = "^0.4.2", default-features = false, features = ["webhooks", "rustls", "retry", "fs"] }
 url = "^2.5"
 
 [dev-dependencies]
@@ -160,7 +160,7 @@ completions = ["completions-types", "_api"]
 completions-types = ["dep:bon", "dep:serde_with"]
 # paths under `/containers`
 container = ["container-types", "_api"]
-container-types = ["dep:timvw-rust-runtime", "dep:bon", "dep:serde_with"]
+container-types = ["dep:bon", "dep:serde_with"]
 # paths under `/content_provenance_checks`
 content-provenance-checks = ["content-provenance-checks-types", "_api"]
 content-provenance-checks-types = ["dep:bon", "dep:serde_with"]
@@ -202,7 +202,7 @@ safety = ["safety-types", "_api"]
 safety-types = ["dep:bon", "dep:serde_with"]
 # tag Skills
 skill = ["skill-types", "_api"]
-skill-types = ["dep:timvw-rust-runtime", "dep:bon", "dep:serde_with"]
+skill-types = ["dep:bon", "dep:serde_with"]
 # tag Uploads
 upload = ["upload-types", "_api"]
 upload-types = ["dep:bon", "dep:serde_with"]
@@ -214,7 +214,7 @@ vectorstore = ["vectorstore-types", "_api"]
 vectorstore-types = ["dep:bon", "dep:serde_with"]
 # tag Videos
 video = ["video-types", "_api"]
-video-types = ["dep:timvw-rust-runtime", "dep:bon", "dep:serde_with"]
+video-types = ["dep:bon", "dep:serde_with"]
 # paths under `/webhook_endpoints`, `/webhook_event_types`
 webhook = ["webhook-types", "_api"]
 webhook-types = ["dep:bon", "dep:serde_with"]

@@ -11,6 +11,7 @@
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, bon::Builder)]
+#[builder(state_mod = mcp_approval_request_resource_mcp_tool_call_builder, finish_fn(vis = "", name = build_internal))]
 pub struct McpApprovalRequestResourceMcpToolCall {
     /// The type of the object. Always `mcp_tool_call`.  Defaults to `\"mcp_tool_call\"`.
     #[serde(rename = "type")]
@@ -21,10 +22,10 @@ pub struct McpApprovalRequestResourceMcpToolCall {
     /// The tool name, or null when CCA does not provide it.
     ///
     /// Validation: `minLength: 0`.
-    #[serde(rename = "name", deserialize_with = "Option::deserialize")]
+    #[serde(rename = "name", default)]
     pub name: Option<String>,
     /// The tool arguments as JSON, or null when CCA does not provide them.
-    #[serde(rename = "arguments", deserialize_with = "Option::deserialize")]
+    #[serde(rename = "arguments", default)]
     pub arguments: Option<serde_json::Value>,
     /// Validation: `minLength: 0`.
     #[serde(rename = "message")]
@@ -46,6 +47,20 @@ impl McpApprovalRequestResourceMcpToolCall {
             arguments,
             message,
         }
+    }
+}
+
+impl<S: mcp_approval_request_resource_mcp_tool_call_builder::State>
+    McpApprovalRequestResourceMcpToolCallBuilder<S>
+where
+    S::Type: mcp_approval_request_resource_mcp_tool_call_builder::IsSet,
+    S::ServerLabel: mcp_approval_request_resource_mcp_tool_call_builder::IsSet,
+    S::Message: mcp_approval_request_resource_mcp_tool_call_builder::IsSet,
+{
+    /// Finish building and return the requested object
+    #[inline(always)]
+    pub fn build(self) -> McpApprovalRequestResourceMcpToolCall {
+        self.build_internal()
     }
 }
 

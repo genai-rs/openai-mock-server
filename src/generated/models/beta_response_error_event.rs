@@ -13,6 +13,7 @@ use serde::{Deserialize, Serialize};
 
 /// BetaResponseErrorEvent : Emitted when an error occurs.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, bon::Builder)]
+#[builder(state_mod = beta_response_error_event_builder, finish_fn(vis = "", name = build_internal))]
 pub struct BetaResponseErrorEvent {
     /// The agent that owns this multi-agent streaming event.
     #[serde(
@@ -26,13 +27,13 @@ pub struct BetaResponseErrorEvent {
     #[serde(rename = "type")]
     pub r#type: Type,
     /// The error code.
-    #[serde(rename = "code", deserialize_with = "Option::deserialize")]
+    #[serde(rename = "code", default)]
     pub code: Option<String>,
     /// The error message.
     #[serde(rename = "message")]
     pub message: String,
     /// The error parameter.
-    #[serde(rename = "param", deserialize_with = "Option::deserialize")]
+    #[serde(rename = "param", default)]
     pub param: Option<String>,
     /// The sequence number of this event.
     #[serde(rename = "sequence_number")]
@@ -56,6 +57,19 @@ impl BetaResponseErrorEvent {
             param,
             sequence_number,
         }
+    }
+}
+
+impl<S: beta_response_error_event_builder::State> BetaResponseErrorEventBuilder<S>
+where
+    S::Type: beta_response_error_event_builder::IsSet,
+    S::Message: beta_response_error_event_builder::IsSet,
+    S::SequenceNumber: beta_response_error_event_builder::IsSet,
+{
+    /// Finish building and return the requested object
+    #[inline(always)]
+    pub fn build(self) -> BetaResponseErrorEvent {
+        self.build_internal()
     }
 }
 

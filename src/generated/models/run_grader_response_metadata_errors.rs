@@ -11,6 +11,7 @@
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, bon::Builder)]
+#[builder(state_mod = run_grader_response_metadata_errors_builder, finish_fn(vis = "", name = build_internal))]
 pub struct RunGraderResponseMetadataErrors {
     #[serde(rename = "formula_parse_error")]
     pub formula_parse_error: bool,
@@ -26,17 +27,11 @@ pub struct RunGraderResponseMetadataErrors {
     pub other_error: bool,
     #[serde(rename = "python_grader_server_error")]
     pub python_grader_server_error: bool,
-    #[serde(
-        rename = "python_grader_server_error_type",
-        deserialize_with = "Option::deserialize"
-    )]
+    #[serde(rename = "python_grader_server_error_type", default)]
     pub python_grader_server_error_type: Option<String>,
     #[serde(rename = "python_grader_runtime_error")]
     pub python_grader_runtime_error: bool,
-    #[serde(
-        rename = "python_grader_runtime_error_details",
-        deserialize_with = "Option::deserialize"
-    )]
+    #[serde(rename = "python_grader_runtime_error_details", default)]
     pub python_grader_runtime_error_details: Option<String>,
     #[serde(rename = "model_grader_server_error")]
     pub model_grader_server_error: bool,
@@ -44,10 +39,7 @@ pub struct RunGraderResponseMetadataErrors {
     pub model_grader_refusal_error: bool,
     #[serde(rename = "model_grader_parse_error")]
     pub model_grader_parse_error: bool,
-    #[serde(
-        rename = "model_grader_server_error_details",
-        deserialize_with = "Option::deserialize"
-    )]
+    #[serde(rename = "model_grader_server_error_details", default)]
     pub model_grader_server_error_details: Option<String>,
 }
 
@@ -84,6 +76,28 @@ impl RunGraderResponseMetadataErrors {
             model_grader_parse_error,
             model_grader_server_error_details,
         }
+    }
+}
+
+impl<S: run_grader_response_metadata_errors_builder::State>
+    RunGraderResponseMetadataErrorsBuilder<S>
+where
+    S::FormulaParseError: run_grader_response_metadata_errors_builder::IsSet,
+    S::SampleParseError: run_grader_response_metadata_errors_builder::IsSet,
+    S::TruncatedObservationError: run_grader_response_metadata_errors_builder::IsSet,
+    S::UnresponsiveRewardError: run_grader_response_metadata_errors_builder::IsSet,
+    S::InvalidVariableError: run_grader_response_metadata_errors_builder::IsSet,
+    S::OtherError: run_grader_response_metadata_errors_builder::IsSet,
+    S::PythonGraderServerError: run_grader_response_metadata_errors_builder::IsSet,
+    S::PythonGraderRuntimeError: run_grader_response_metadata_errors_builder::IsSet,
+    S::ModelGraderServerError: run_grader_response_metadata_errors_builder::IsSet,
+    S::ModelGraderRefusalError: run_grader_response_metadata_errors_builder::IsSet,
+    S::ModelGraderParseError: run_grader_response_metadata_errors_builder::IsSet,
+{
+    /// Finish building and return the requested object
+    #[inline(always)]
+    pub fn build(self) -> RunGraderResponseMetadataErrors {
+        self.build_internal()
     }
 }
 

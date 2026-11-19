@@ -12,6 +12,7 @@ use crate::models;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, bon::Builder)]
+#[builder(state_mod = beta_response_builder, finish_fn(vis = "", name = build_internal))]
 pub struct BetaResponse {
     /// Set of 16 key-value pairs that can be attached to an object. This can be useful for storing additional information about the object in a structured format, and querying for objects via API or the dashboard.  Keys are strings with a maximum length of 64 characters. Values are strings with a maximum length of 512 characters.
     #[serde(
@@ -170,12 +171,9 @@ pub struct BetaResponse {
         with = "super::unix_time::fractional::double_option"
     )]
     pub completed_at: Option<Option<jiff::Timestamp>>,
-    #[serde(rename = "error", deserialize_with = "Option::deserialize")]
+    #[serde(rename = "error", default)]
     pub error: Option<models::BetaResponseError>,
-    #[serde(
-        rename = "incomplete_details",
-        deserialize_with = "Option::deserialize"
-    )]
+    #[serde(rename = "incomplete_details", default)]
     pub incomplete_details: Option<models::BetaResponseAllOfIncompleteDetails>,
     /// Reasoning inputs withheld from the model, in input order.
     #[serde(
@@ -193,7 +191,7 @@ pub struct BetaResponse {
         skip_serializing_if = "Option::is_none"
     )]
     pub reasoning: Option<Option<models::BetaReasoning>>,
-    #[serde(rename = "instructions", deserialize_with = "Option::deserialize")]
+    #[serde(rename = "instructions", default)]
     pub instructions: Option<models::BetaResponseAllOfInstructions>,
     /// SDK-only convenience property that contains the aggregated text output from all `output_text` items in the `output` array, if any are present. Supported in the Python and JavaScript SDKs.
     #[serde(
@@ -303,6 +301,22 @@ impl BetaResponse {
             conversation: None,
             max_output_tokens: None,
         }
+    }
+}
+
+impl<S: beta_response_builder::State> BetaResponseBuilder<S>
+where
+    S::Model: beta_response_builder::IsSet,
+    S::Id: beta_response_builder::IsSet,
+    S::Object: beta_response_builder::IsSet,
+    S::CreatedAt: beta_response_builder::IsSet,
+    S::Output: beta_response_builder::IsSet,
+    S::ParallelToolCalls: beta_response_builder::IsSet,
+{
+    /// Finish building and return the requested object
+    #[inline(always)]
+    pub fn build(self) -> BetaResponse {
+        self.build_internal()
     }
 }
 

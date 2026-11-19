@@ -13,6 +13,7 @@ use serde::{Deserialize, Serialize};
 
 /// AgentResource : A reusable agent scoped to the caller's project.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, bon::Builder)]
+#[builder(state_mod = agent_resource_builder, finish_fn(vis = "", name = build_internal))]
 pub struct AgentResource {
     /// The ID of the reusable agent.
     ///
@@ -31,7 +32,7 @@ pub struct AgentResource {
     /// A human-readable name for the agent, or null if it is unnamed.
     ///
     /// Validation: `minLength: 0`.
-    #[serde(rename = "name", deserialize_with = "Option::deserialize")]
+    #[serde(rename = "name", default)]
     pub name: Option<String>,
     /// Custom string key-value pairs attached to the agent.
     ///
@@ -52,7 +53,7 @@ pub struct AgentResource {
     /// Custom instructions appended to the agent's default base instructions.
     ///
     /// Validation: `minLength: 0`.
-    #[serde(rename = "instructions", deserialize_with = "Option::deserialize")]
+    #[serde(rename = "instructions", default)]
     pub instructions: Option<String>,
     /// Tools available to the agent.
     ///
@@ -101,6 +102,27 @@ impl AgentResource {
             compaction: None,
             experimental: None,
         }
+    }
+}
+
+impl<S: agent_resource_builder::State> AgentResourceBuilder<S>
+where
+    S::Id: agent_resource_builder::IsSet,
+    S::Object: agent_resource_builder::IsSet,
+    S::CreatedAt: agent_resource_builder::IsSet,
+    S::UpdatedAt: agent_resource_builder::IsSet,
+    S::Metadata: agent_resource_builder::IsSet,
+    S::Model: agent_resource_builder::IsSet,
+    S::Reasoning: agent_resource_builder::IsSet,
+    S::Text: agent_resource_builder::IsSet,
+    S::ServiceTier: agent_resource_builder::IsSet,
+    S::Tools: agent_resource_builder::IsSet,
+    S::MultiAgent: agent_resource_builder::IsSet,
+{
+    /// Finish building and return the requested object
+    #[inline(always)]
+    pub fn build(self) -> AgentResource {
+        self.build_internal()
     }
 }
 

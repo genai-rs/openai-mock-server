@@ -12,11 +12,12 @@ use crate::models;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, bon::Builder)]
+#[builder(state_mod = create_completion_request_builder, finish_fn(vis = "", name = build_internal))]
 pub struct CreateCompletionRequest {
     /// ID of the model to use. You can use the [List models](https://developers.openai.com/api/reference/resources/models/methods/list) API to see all of your available models, or see our [Model overview](https://developers.openai.com/api/docs/models) for descriptions of them.
     #[serde(rename = "model")]
     pub model: String,
-    #[serde(rename = "prompt", deserialize_with = "Option::deserialize")]
+    #[serde(rename = "prompt", default)]
     pub prompt: Option<models::CreateCompletionRequestPrompt>,
     /// Generates `best_of` completions server-side and returns the \"best\" (the one with the highest log probability per token). Results cannot be streamed.  When used with `n`, `best_of` controls the number of candidate completions and `n` specifies how many to return – `best_of` must be greater than `n`.  **Note:** Because this parameter generates many completions, it can quickly consume your token quota. Use carefully and ensure that you have reasonable settings for `max_tokens` and `stop`.  Defaults to `1`.
     ///
@@ -182,6 +183,17 @@ impl CreateCompletionRequest {
             top_p: None,
             user: None,
         }
+    }
+}
+
+impl<S: create_completion_request_builder::State> CreateCompletionRequestBuilder<S>
+where
+    S::Model: create_completion_request_builder::IsSet,
+{
+    /// Finish building and return the requested object
+    #[inline(always)]
+    pub fn build(self) -> CreateCompletionRequest {
+        self.build_internal()
     }
 }
 

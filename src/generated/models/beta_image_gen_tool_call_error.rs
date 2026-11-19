@@ -12,9 +12,10 @@ use crate::models;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, bon::Builder)]
+#[builder(state_mod = beta_image_gen_tool_call_error_builder, finish_fn(vis = "", name = build_internal))]
 pub struct BetaImageGenToolCallError {
     /// The error code.
-    #[serde(rename = "code", deserialize_with = "Option::deserialize")]
+    #[serde(rename = "code", default)]
     pub code: Option<String>,
     /// The error type.
     #[serde(rename = "type")]
@@ -23,7 +24,7 @@ pub struct BetaImageGenToolCallError {
     #[serde(rename = "message")]
     pub message: String,
     /// The related request parameter.
-    #[serde(rename = "param", deserialize_with = "Option::deserialize")]
+    #[serde(rename = "param", default)]
     pub param: Option<String>,
     #[serde(rename = "moderation_details", skip_serializing_if = "Option::is_none")]
     pub moderation_details: Option<models::BetaImageGenToolCallModerationDetails>,
@@ -43,6 +44,18 @@ impl BetaImageGenToolCallError {
             param,
             moderation_details: None,
         }
+    }
+}
+
+impl<S: beta_image_gen_tool_call_error_builder::State> BetaImageGenToolCallErrorBuilder<S>
+where
+    S::Type: beta_image_gen_tool_call_error_builder::IsSet,
+    S::Message: beta_image_gen_tool_call_error_builder::IsSet,
+{
+    /// Finish building and return the requested object
+    #[inline(always)]
+    pub fn build(self) -> BetaImageGenToolCallError {
+        self.build_internal()
     }
 }
 

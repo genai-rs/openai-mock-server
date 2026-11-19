@@ -13,6 +13,7 @@ use serde::{Deserialize, Serialize};
 
 /// SubagentResource : A subagent created within a session.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, bon::Builder)]
+#[builder(state_mod = subagent_resource_builder, finish_fn(vis = "", name = build_internal))]
 pub struct SubagentResource {
     /// The ID of the subagent.
     ///
@@ -29,12 +30,12 @@ pub struct SubagentResource {
     /// The runner-assigned nickname, or null when unavailable.
     ///
     /// Validation: `minLength: 0`.
-    #[serde(rename = "name", deserialize_with = "Option::deserialize")]
+    #[serde(rename = "name", default)]
     pub name: Option<String>,
     /// Initial task content, or null when unavailable. Text may contain placeholders for images or audio when only a preview is available.
     ///
     /// Validation: `minItems: 0`, `maxItems: 2000`.
-    #[serde(rename = "instructions", deserialize_with = "Option::deserialize")]
+    #[serde(rename = "instructions", default)]
     pub instructions: Option<Vec<models::AgentContentResource>>,
     /// The ID of the agent that created this subagent.
     ///
@@ -47,7 +48,7 @@ pub struct SubagentResource {
     #[serde(rename = "opened_at")]
     pub opened_at: i64,
     /// The Unix timestamp, in seconds, when the subagent was closed. Null while active, including after resume.
-    #[serde(rename = "closed_at", deserialize_with = "Option::deserialize")]
+    #[serde(rename = "closed_at", default)]
     pub closed_at: Option<i64>,
 }
 
@@ -75,6 +76,22 @@ impl SubagentResource {
             opened_at,
             closed_at,
         }
+    }
+}
+
+impl<S: subagent_resource_builder::State> SubagentResourceBuilder<S>
+where
+    S::Id: subagent_resource_builder::IsSet,
+    S::Object: subagent_resource_builder::IsSet,
+    S::SessionId: subagent_resource_builder::IsSet,
+    S::ParentAgentId: subagent_resource_builder::IsSet,
+    S::Status: subagent_resource_builder::IsSet,
+    S::OpenedAt: subagent_resource_builder::IsSet,
+{
+    /// Finish building and return the requested object
+    #[inline(always)]
+    pub fn build(self) -> SubagentResource {
+        self.build_internal()
     }
 }
 

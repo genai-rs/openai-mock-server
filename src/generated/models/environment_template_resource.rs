@@ -13,6 +13,7 @@ use serde::{Deserialize, Serialize};
 
 /// EnvironmentTemplateResource : Reusable configuration that provisions a fresh OpenAI-hosted environment for each session.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, bon::Builder)]
+#[builder(state_mod = environment_template_resource_builder, finish_fn(vis = "", name = build_internal))]
 pub struct EnvironmentTemplateResource {
     /// The ID of the reusable environment template.
     ///
@@ -22,7 +23,7 @@ pub struct EnvironmentTemplateResource {
     /// An optional human-readable display name for the template.
     ///
     /// Validation: `minLength: 0`.
-    #[serde(rename = "name", deserialize_with = "Option::deserialize")]
+    #[serde(rename = "name", default)]
     pub name: Option<String>,
     /// The object type. Always `agent.environment.template`.  Defaults to `\"agent.environment.template\"`.
     #[serde(rename = "object")]
@@ -91,6 +92,27 @@ impl EnvironmentTemplateResource {
             plugins,
             files,
         }
+    }
+}
+
+impl<S: environment_template_resource_builder::State> EnvironmentTemplateResourceBuilder<S>
+where
+    S::Id: environment_template_resource_builder::IsSet,
+    S::Object: environment_template_resource_builder::IsSet,
+    S::CreatedAt: environment_template_resource_builder::IsSet,
+    S::UpdatedAt: environment_template_resource_builder::IsSet,
+    S::Packages: environment_template_resource_builder::IsSet,
+    S::Network: environment_template_resource_builder::IsSet,
+    S::Desktop: environment_template_resource_builder::IsSet,
+    S::CapabilityDirectories: environment_template_resource_builder::IsSet,
+    S::Skills: environment_template_resource_builder::IsSet,
+    S::Plugins: environment_template_resource_builder::IsSet,
+    S::Files: environment_template_resource_builder::IsSet,
+{
+    /// Finish building and return the requested object
+    #[inline(always)]
+    pub fn build(self) -> EnvironmentTemplateResource {
+        self.build_internal()
     }
 }
 

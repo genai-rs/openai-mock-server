@@ -13,6 +13,7 @@ use serde::{Deserialize, Serialize};
 
 /// ThreadListResource : A paginated list of ChatKit threads.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, bon::Builder)]
+#[builder(state_mod = thread_list_resource_builder, finish_fn(vis = "", name = build_internal))]
 pub struct ThreadListResource {
     /// The type of object returned, must be `list`.  Defaults to `\"list\"`.
     #[serde(rename = "object")]
@@ -21,10 +22,10 @@ pub struct ThreadListResource {
     #[serde(rename = "data")]
     pub data: Vec<models::ThreadResource>,
     /// The ID of the first item in the list.
-    #[serde(rename = "first_id", deserialize_with = "Option::deserialize")]
+    #[serde(rename = "first_id", default)]
     pub first_id: Option<String>,
     /// The ID of the last item in the list.
-    #[serde(rename = "last_id", deserialize_with = "Option::deserialize")]
+    #[serde(rename = "last_id", default)]
     pub last_id: Option<String>,
     /// Whether there are more items available.
     #[serde(rename = "has_more")]
@@ -47,6 +48,19 @@ impl ThreadListResource {
             last_id,
             has_more,
         }
+    }
+}
+
+impl<S: thread_list_resource_builder::State> ThreadListResourceBuilder<S>
+where
+    S::Object: thread_list_resource_builder::IsSet,
+    S::Data: thread_list_resource_builder::IsSet,
+    S::HasMore: thread_list_resource_builder::IsSet,
+{
+    /// Finish building and return the requested object
+    #[inline(always)]
+    pub fn build(self) -> ThreadListResource {
+        self.build_internal()
     }
 }
 

@@ -13,6 +13,7 @@ use serde::{Deserialize, Serialize};
 
 /// EnvironmentFileListResource : A paginated list of live execution environment files.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, bon::Builder)]
+#[builder(state_mod = environment_file_list_resource_builder, finish_fn(vis = "", name = build_internal))]
 pub struct EnvironmentFileListResource {
     #[serde(rename = "object")]
     pub object: models::EnvironmentFilePageObjectResource,
@@ -24,7 +25,7 @@ pub struct EnvironmentFileListResource {
     /// The opaque cursor to use when requesting the next page, if any.
     ///
     /// Validation: `minLength: 0`.
-    #[serde(rename = "next", deserialize_with = "Option::deserialize")]
+    #[serde(rename = "next", default)]
     pub next: Option<String>,
     /// Whether more files follow this page.
     #[serde(rename = "has_more")]
@@ -45,6 +46,19 @@ impl EnvironmentFileListResource {
             next,
             has_more,
         }
+    }
+}
+
+impl<S: environment_file_list_resource_builder::State> EnvironmentFileListResourceBuilder<S>
+where
+    S::Object: environment_file_list_resource_builder::IsSet,
+    S::Data: environment_file_list_resource_builder::IsSet,
+    S::HasMore: environment_file_list_resource_builder::IsSet,
+{
+    /// Finish building and return the requested object
+    #[inline(always)]
+    pub fn build(self) -> EnvironmentFileListResource {
+        self.build_internal()
     }
 }
 

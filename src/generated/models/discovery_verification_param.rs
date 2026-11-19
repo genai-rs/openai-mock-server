@@ -11,11 +11,12 @@
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, bon::Builder)]
+#[builder(state_mod = discovery_verification_param_builder, finish_fn(vis = "", name = build_internal))]
 pub struct DiscoveryVerificationParam {
     /// Defaults to `\"discovery\"`.
     #[serde(rename = "type")]
     pub r#type: Type,
-    #[serde(rename = "discovery_url", deserialize_with = "Option::deserialize")]
+    #[serde(rename = "discovery_url", default)]
     pub discovery_url: Option<String>,
 }
 
@@ -25,6 +26,17 @@ impl DiscoveryVerificationParam {
             r#type,
             discovery_url,
         }
+    }
+}
+
+impl<S: discovery_verification_param_builder::State> DiscoveryVerificationParamBuilder<S>
+where
+    S::Type: discovery_verification_param_builder::IsSet,
+{
+    /// Finish building and return the requested object
+    #[inline(always)]
+    pub fn build(self) -> DiscoveryVerificationParam {
+        self.build_internal()
     }
 }
 

@@ -12,12 +12,13 @@ use crate::models;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, bon::Builder)]
+#[builder(state_mod = answer_resource_choice_builder, finish_fn(vis = "", name = build_internal))]
 pub struct AnswerResourceChoice {
     /// The type of the object. Always `choice`.  Defaults to `\"choice\"`.
     #[serde(rename = "type")]
     pub r#type: Type,
     /// Validation: `minLength: 0`.
-    #[serde(rename = "name", deserialize_with = "Option::deserialize")]
+    #[serde(rename = "name", default)]
     pub name: Option<String>,
     #[serde(rename = "choice")]
     pub choice: models::ChoiceValueResource,
@@ -43,6 +44,20 @@ impl AnswerResourceChoice {
             probabilities,
             confidence,
         }
+    }
+}
+
+impl<S: answer_resource_choice_builder::State> AnswerResourceChoiceBuilder<S>
+where
+    S::Type: answer_resource_choice_builder::IsSet,
+    S::Choice: answer_resource_choice_builder::IsSet,
+    S::Probabilities: answer_resource_choice_builder::IsSet,
+    S::Confidence: answer_resource_choice_builder::IsSet,
+{
+    /// Finish building and return the requested object
+    #[inline(always)]
+    pub fn build(self) -> AnswerResourceChoice {
+        self.build_internal()
     }
 }
 

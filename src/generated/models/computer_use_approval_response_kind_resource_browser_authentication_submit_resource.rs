@@ -11,6 +11,7 @@
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, bon::Builder)]
+#[builder(state_mod = computer_use_approval_response_kind_resource_browser_authentication_submit_resource_builder, finish_fn(vis = "", name = build_internal))]
 pub struct ComputerUseApprovalResponseKindResourceBrowserAuthenticationSubmitResource {
     /// Defaults to `\"browser_authentication\"`.
     #[serde(rename = "type")]
@@ -21,7 +22,7 @@ pub struct ComputerUseApprovalResponseKindResourceBrowserAuthenticationSubmitRes
     /// The chosen sign-in method, or null when no options were offered.
     ///
     /// Validation: `minLength: 0`.
-    #[serde(rename = "selected_option", deserialize_with = "Option::deserialize")]
+    #[serde(rename = "selected_option", default)]
     pub selected_option: Option<String>,
 }
 
@@ -36,6 +37,18 @@ impl ComputerUseApprovalResponseKindResourceBrowserAuthenticationSubmitResource 
             action,
             selected_option,
         }
+    }
+}
+
+impl<S: computer_use_approval_response_kind_resource_browser_authentication_submit_resource_builder::State> ComputerUseApprovalResponseKindResourceBrowserAuthenticationSubmitResourceBuilder<S>
+where
+    S::Type: computer_use_approval_response_kind_resource_browser_authentication_submit_resource_builder::IsSet,
+    S::Action: computer_use_approval_response_kind_resource_browser_authentication_submit_resource_builder::IsSet,
+{
+    /// Finish building and return the requested object
+    #[inline(always)]
+    pub fn build(self) -> ComputerUseApprovalResponseKindResourceBrowserAuthenticationSubmitResource {
+        self.build_internal()
     }
 }
 

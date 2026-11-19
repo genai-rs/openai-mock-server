@@ -13,6 +13,7 @@ use serde::{Deserialize, Serialize};
 
 /// TurnResource : The canonical public representation of a session turn.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, bon::Builder)]
+#[builder(state_mod = turn_resource_builder, finish_fn(vis = "", name = build_internal))]
 pub struct TurnResource {
     /// Prompt cache lifetime selected when this turn started, including an inherited session TTL. Null when the turn used the model default or no TTL was recorded.
     #[serde(
@@ -42,7 +43,7 @@ pub struct TurnResource {
     /// The ID of the subagent that ran the turn, if applicable.
     ///
     /// Validation: `minLength: 0`.
-    #[serde(rename = "subagent_id", deserialize_with = "Option::deserialize")]
+    #[serde(rename = "subagent_id", default)]
     pub subagent_id: Option<String>,
     #[serde(rename = "status")]
     pub status: models::TurnStatusResource,
@@ -50,16 +51,16 @@ pub struct TurnResource {
     #[serde(rename = "created_at")]
     pub created_at: i64,
     /// The Unix timestamp, in seconds, when the turn started.
-    #[serde(rename = "started_at", deserialize_with = "Option::deserialize")]
+    #[serde(rename = "started_at", default)]
     pub started_at: Option<i64>,
     /// The Unix timestamp, in seconds, when the turn reached a terminal state.
-    #[serde(rename = "completed_at", deserialize_with = "Option::deserialize")]
+    #[serde(rename = "completed_at", default)]
     pub completed_at: Option<i64>,
     /// A customer-safe error. Non-null only for a failed turn.
-    #[serde(rename = "error", deserialize_with = "Option::deserialize")]
+    #[serde(rename = "error", default)]
     pub error: Option<models::SessionTurnErrorResource>,
     /// Best-effort token usage for the turn, or null if unknown. Recorded usage may change.
-    #[serde(rename = "usage", deserialize_with = "Option::deserialize")]
+    #[serde(rename = "usage", default)]
     pub usage: Option<models::TokenUsageResource>,
 }
 
@@ -92,6 +93,22 @@ impl TurnResource {
             error,
             usage,
         }
+    }
+}
+
+impl<S: turn_resource_builder::State> TurnResourceBuilder<S>
+where
+    S::Id: turn_resource_builder::IsSet,
+    S::Object: turn_resource_builder::IsSet,
+    S::SessionId: turn_resource_builder::IsSet,
+    S::AgentId: turn_resource_builder::IsSet,
+    S::Status: turn_resource_builder::IsSet,
+    S::CreatedAt: turn_resource_builder::IsSet,
+{
+    /// Finish building and return the requested object
+    #[inline(always)]
+    pub fn build(self) -> TurnResource {
+        self.build_internal()
     }
 }
 

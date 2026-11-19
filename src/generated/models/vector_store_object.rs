@@ -13,6 +13,7 @@ use serde::{Deserialize, Serialize};
 
 /// VectorStoreObject : A vector store is a collection of processed files can be used by the `file_search` tool.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, bon::Builder)]
+#[builder(state_mod = vector_store_object_builder, finish_fn(vis = "", name = build_internal))]
 pub struct VectorStoreObject {
     /// The identifier, which can be referenced in API endpoints.
     #[serde(rename = "id")]
@@ -45,10 +46,10 @@ pub struct VectorStoreObject {
     )]
     pub expires_at: Option<Option<jiff::Timestamp>>,
     /// The Unix timestamp (in seconds) for when the vector store was last active.
-    #[serde(rename = "last_active_at", with = "super::unix_time::option")]
+    #[serde(rename = "last_active_at", default, with = "super::unix_time::option")]
     pub last_active_at: Option<jiff::Timestamp>,
     /// Set of 16 key-value pairs that can be attached to an object. This can be useful for storing additional information about the object in a structured format, and querying for objects via API or the dashboard.  Keys are strings with a maximum length of 64 characters. Values are strings with a maximum length of 512 characters.
-    #[serde(rename = "metadata", deserialize_with = "Option::deserialize")]
+    #[serde(rename = "metadata", default)]
     pub metadata: Option<std::collections::HashMap<String, String>>,
 }
 
@@ -78,6 +79,23 @@ impl VectorStoreObject {
             last_active_at,
             metadata,
         }
+    }
+}
+
+impl<S: vector_store_object_builder::State> VectorStoreObjectBuilder<S>
+where
+    S::Id: vector_store_object_builder::IsSet,
+    S::Object: vector_store_object_builder::IsSet,
+    S::CreatedAt: vector_store_object_builder::IsSet,
+    S::Name: vector_store_object_builder::IsSet,
+    S::UsageBytes: vector_store_object_builder::IsSet,
+    S::FileCounts: vector_store_object_builder::IsSet,
+    S::Status: vector_store_object_builder::IsSet,
+{
+    /// Finish building and return the requested object
+    #[inline(always)]
+    pub fn build(self) -> VectorStoreObject {
+        self.build_internal()
     }
 }
 

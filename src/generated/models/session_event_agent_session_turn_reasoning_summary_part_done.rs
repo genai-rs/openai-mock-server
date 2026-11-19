@@ -13,6 +13,7 @@ use serde::{Deserialize, Serialize};
 
 /// SessionEventAgentSessionTurnReasoningSummaryPartDone : Emitted when a reasoning summary part is complete.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, bon::Builder)]
+#[builder(state_mod = session_event_agent_session_turn_reasoning_summary_part_done_builder, finish_fn(vis = "", name = build_internal))]
 pub struct SessionEventAgentSessionTurnReasoningSummaryPartDone {
     /// The type of the object. Always `agent.session.turn.reasoning_summary_part.done`.  Defaults to `\"agent.session.turn.reasoning_summary_part.done\"`.
     #[serde(rename = "type")]
@@ -30,7 +31,7 @@ pub struct SessionEventAgentSessionTurnReasoningSummaryPartDone {
     /// The ID of the turn associated with the event, when applicable.
     ///
     /// Validation: `minLength: 0`.
-    #[serde(rename = "turn_id", deserialize_with = "Option::deserialize")]
+    #[serde(rename = "turn_id", default)]
     pub turn_id: Option<String>,
     /// The ID of the reasoning item.
     ///
@@ -50,7 +51,7 @@ pub struct SessionEventAgentSessionTurnReasoningSummaryPartDone {
     #[serde(rename = "part")]
     pub part: models::SummaryTextResource,
     /// Present as `incomplete` when summary generation was interrupted.
-    #[serde(rename = "status", deserialize_with = "Option::deserialize")]
+    #[serde(rename = "status", default)]
     pub status: Option<Status>,
     /// Random alphanumeric padding. Present when stream obfuscation is enabled.
     ///
@@ -84,6 +85,24 @@ impl SessionEventAgentSessionTurnReasoningSummaryPartDone {
             status,
             obfuscation: None,
         }
+    }
+}
+
+impl<S: session_event_agent_session_turn_reasoning_summary_part_done_builder::State>
+    SessionEventAgentSessionTurnReasoningSummaryPartDoneBuilder<S>
+where
+    S::Type: session_event_agent_session_turn_reasoning_summary_part_done_builder::IsSet,
+    S::EventId: session_event_agent_session_turn_reasoning_summary_part_done_builder::IsSet,
+    S::SessionId: session_event_agent_session_turn_reasoning_summary_part_done_builder::IsSet,
+    S::ItemId: session_event_agent_session_turn_reasoning_summary_part_done_builder::IsSet,
+    S::OutputIndex: session_event_agent_session_turn_reasoning_summary_part_done_builder::IsSet,
+    S::SummaryIndex: session_event_agent_session_turn_reasoning_summary_part_done_builder::IsSet,
+    S::Part: session_event_agent_session_turn_reasoning_summary_part_done_builder::IsSet,
+{
+    /// Finish building and return the requested object
+    #[inline(always)]
+    pub fn build(self) -> SessionEventAgentSessionTurnReasoningSummaryPartDone {
+        self.build_internal()
     }
 }
 

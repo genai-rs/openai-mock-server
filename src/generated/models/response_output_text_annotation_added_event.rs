@@ -13,6 +13,7 @@ use serde::{Deserialize, Serialize};
 
 /// ResponseOutputTextAnnotationAddedEvent : Emitted when an annotation is added to output text content.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, bon::Builder)]
+#[builder(state_mod = response_output_text_annotation_added_event_builder, finish_fn(vis = "", name = build_internal))]
 pub struct ResponseOutputTextAnnotationAddedEvent {
     /// The type of the event. Always 'response.output_text.annotation.added'.
     #[serde(rename = "type")]
@@ -33,7 +34,7 @@ pub struct ResponseOutputTextAnnotationAddedEvent {
     #[serde(rename = "sequence_number")]
     pub sequence_number: i64,
     /// The annotation object being added. (See annotation schema for details.)
-    #[serde(rename = "annotation", deserialize_with = "Option::deserialize")]
+    #[serde(rename = "annotation", default)]
     pub annotation: Option<models::Annotation>,
 }
 
@@ -57,6 +58,23 @@ impl ResponseOutputTextAnnotationAddedEvent {
             sequence_number,
             annotation,
         }
+    }
+}
+
+impl<S: response_output_text_annotation_added_event_builder::State>
+    ResponseOutputTextAnnotationAddedEventBuilder<S>
+where
+    S::Type: response_output_text_annotation_added_event_builder::IsSet,
+    S::ItemId: response_output_text_annotation_added_event_builder::IsSet,
+    S::OutputIndex: response_output_text_annotation_added_event_builder::IsSet,
+    S::ContentIndex: response_output_text_annotation_added_event_builder::IsSet,
+    S::AnnotationIndex: response_output_text_annotation_added_event_builder::IsSet,
+    S::SequenceNumber: response_output_text_annotation_added_event_builder::IsSet,
+{
+    /// Finish building and return the requested object
+    #[inline(always)]
+    pub fn build(self) -> ResponseOutputTextAnnotationAddedEvent {
+        self.build_internal()
     }
 }
 

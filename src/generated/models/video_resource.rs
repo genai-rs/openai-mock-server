@@ -13,6 +13,7 @@ use serde::{Deserialize, Serialize};
 
 /// VideoResource : Structured information describing a generated video job.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, bon::Builder)]
+#[builder(state_mod = video_resource_builder, finish_fn(vis = "", name = build_internal))]
 pub struct VideoResource {
     /// Unique identifier for the video job.
     #[serde(rename = "id")]
@@ -31,13 +32,13 @@ pub struct VideoResource {
     #[serde(rename = "created_at", with = "super::unix_time")]
     pub created_at: jiff::Timestamp,
     /// Unix timestamp (seconds) for when the job completed, if finished.
-    #[serde(rename = "completed_at", with = "super::unix_time::option")]
+    #[serde(rename = "completed_at", default, with = "super::unix_time::option")]
     pub completed_at: Option<jiff::Timestamp>,
     /// Unix timestamp (seconds) for when the downloadable assets expire, if set.
-    #[serde(rename = "expires_at", with = "super::unix_time::option")]
+    #[serde(rename = "expires_at", default, with = "super::unix_time::option")]
     pub expires_at: Option<jiff::Timestamp>,
     /// The prompt that was used to generate the video.
-    #[serde(rename = "prompt", deserialize_with = "Option::deserialize")]
+    #[serde(rename = "prompt", default)]
     pub prompt: Option<String>,
     #[serde(rename = "size")]
     pub size: models::VideoSize,
@@ -45,12 +46,9 @@ pub struct VideoResource {
     #[serde(rename = "seconds")]
     pub seconds: String,
     /// Identifier of the source video if this video is a remix.
-    #[serde(
-        rename = "remixed_from_video_id",
-        deserialize_with = "Option::deserialize"
-    )]
+    #[serde(rename = "remixed_from_video_id", default)]
     pub remixed_from_video_id: Option<String>,
-    #[serde(rename = "error", deserialize_with = "Option::deserialize")]
+    #[serde(rename = "error", default)]
     pub error: Option<models::Error2>,
 }
 
@@ -86,6 +84,24 @@ impl VideoResource {
             remixed_from_video_id,
             error,
         }
+    }
+}
+
+impl<S: video_resource_builder::State> VideoResourceBuilder<S>
+where
+    S::Id: video_resource_builder::IsSet,
+    S::Object: video_resource_builder::IsSet,
+    S::Model: video_resource_builder::IsSet,
+    S::Status: video_resource_builder::IsSet,
+    S::Progress: video_resource_builder::IsSet,
+    S::CreatedAt: video_resource_builder::IsSet,
+    S::Size: video_resource_builder::IsSet,
+    S::Seconds: video_resource_builder::IsSet,
+{
+    /// Finish building and return the requested object
+    #[inline(always)]
+    pub fn build(self) -> VideoResource {
+        self.build_internal()
     }
 }
 
