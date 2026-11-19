@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.3](https://github.com/genai-rs/openai-mock-server/compare/v0.2.2...v0.2.3) - 2026-11-19
+
+### Added
+
+- validate requests and send webhooks, with openapi-generator-timvw-rust 0.41.0
+
+### Other
+
+- the webhook test needs the webhook-events-types feature
+
 ## [0.2.2](https://github.com/genai-rs/openai-mock-server/compare/v0.2.1...v0.2.2) - 2026-11-19
 
 ### Added
