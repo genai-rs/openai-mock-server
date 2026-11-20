@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.5](https://github.com/genai-rs/openai-mock-server/compare/v0.2.4...v0.2.5) - 2026-11-20
+
+### Added
+
+- regenerate from OpenAI's specification at 76a4810f6cec796923bb6f4cc874237571a6305b
+
 ## [0.2.4](https://github.com/genai-rs/openai-mock-server/compare/v0.2.3...v0.2.4) - 2026-11-20
 
 ### Other
