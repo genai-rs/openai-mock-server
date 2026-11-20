@@ -4902,6 +4902,10 @@ pub use self::edit_image_body_json_param_size::EditImageBodyJsonParamSize;
 pub mod edit_image_body_json_param_size_text_variant_enum;
 #[cfg(feature = "image-types")]
 pub use self::edit_image_body_json_param_size_text_variant_enum::EditImageBodyJsonParamSizeTextVariantEnum;
+#[cfg(feature = "administration-types")]
+pub mod email_notification_channel;
+#[cfg(feature = "administration-types")]
+pub use self::email_notification_channel::EmailNotificationChannel;
 #[cfg(feature = "embedding-types")]
 pub mod embedding;
 #[cfg(feature = "embedding-types")]
@@ -7345,6 +7349,10 @@ pub mod live_session_create_response_transport_object1;
 #[cfg(feature = "live-types")]
 pub use self::live_session_create_response_transport_object1::LiveSessionCreateResponseTransportObject1;
 #[cfg(feature = "types")]
+pub mod live_session_paused;
+#[cfg(feature = "types")]
+pub use self::live_session_paused::LiveSessionPaused;
+#[cfg(feature = "types")]
 pub mod live_session_resource_param;
 #[cfg(feature = "types")]
 pub use self::live_session_resource_param::LiveSessionResourceParam;
@@ -7352,6 +7360,10 @@ pub use self::live_session_resource_param::LiveSessionResourceParam;
 pub mod live_session_resource_param_delegation;
 #[cfg(feature = "types")]
 pub use self::live_session_resource_param_delegation::LiveSessionResourceParamDelegation;
+#[cfg(feature = "types")]
+pub mod live_session_resumed;
+#[cfg(feature = "types")]
+pub use self::live_session_resumed::LiveSessionResumed;
 #[cfg(feature = "types")]
 pub mod live_session_start_event;
 #[cfg(feature = "types")]
@@ -7456,6 +7468,10 @@ pub use self::live_specific_web_search_param::LiveSpecificWebSearchParam;
 pub mod live_specific_web_search_preview_param;
 #[cfg(feature = "live-types")]
 pub use self::live_specific_web_search_preview_param::LiveSpecificWebSearchPreviewParam;
+#[cfg(feature = "live-types")]
+pub mod live_speech_wake_policy_param;
+#[cfg(feature = "live-types")]
+pub use self::live_speech_wake_policy_param::LiveSpeechWakePolicyParam;
 #[cfg(feature = "live-types")]
 pub mod live_text_verbosity;
 #[cfg(feature = "live-types")]
@@ -11908,6 +11924,10 @@ pub use self::spend_limit_currency::SpendLimitCurrency;
 pub mod spend_limit_currency_text_variant_enum;
 #[cfg(feature = "administration-types")]
 pub use self::spend_limit_currency_text_variant_enum::SpendLimitCurrencyTextVariantEnum;
+#[cfg(feature = "administration-types")]
+pub mod spend_limit_email_notification_channel_params;
+#[cfg(feature = "administration-types")]
+pub use self::spend_limit_email_notification_channel_params::SpendLimitEmailNotificationChannelParams;
 #[cfg(feature = "administration-types")]
 pub mod spend_limit_enforcement;
 #[cfg(feature = "administration-types")]
