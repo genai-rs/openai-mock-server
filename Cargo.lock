@@ -1221,7 +1221,7 @@ dependencies = [
 
 [[package]]
 name = "openai-mock-server"
-version = "0.2.3"
+version = "0.2.4"
 dependencies = [
  "axum",
  "bon",
