@@ -1,6 +1,6 @@
 [package]
 name = "openai-mock-server"
-version = "0.2.3"
+version = "0.2.4"
 authors = ["Tim Van Wassenhove <github@timvw.be>"]
 description = "A scripted mock of the OpenAI API for tests, served by an axum server generated from OpenAI's OpenAPI specification"
 license = "MIT OR Apache-2.0"
