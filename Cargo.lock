@@ -1114,13 +1114,102 @@ checksum = "9f7c3e4beb33f85d45ae3e3a1792185706c8e16d043238c593331cc7cd313b50"
 
 [[package]]
 name = "openai-client-base"
-version = "0.36.0"
+version = "0.37.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "baaa76272b35be10dcb5461b666bc72bda09bd5c51d711baca51ec57c799c1f4"
+checksum = "c4ccfc68f347b9f8ab6e5ba0faa42ea7b42d3a21f010d865a4261e8efcf886a9"
+dependencies = [
+ "openai-client-base-assistants",
+ "openai-client-base-chat",
+ "openai-client-base-common",
+ "openai-client-base-realtime",
+ "openai-client-base-responses",
+]
+
+[[package]]
+name = "openai-client-base-assistants"
+version = "0.37.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7dd0c1e07400342b45012182381260789c16bcec15ab709901cfcfc9f281265f"
 dependencies = [
  "bon",
  "futures-core",
  "jiff 1.0.1",
+ "openai-client-base-common",
+ "regex",
+ "serde",
+ "serde_json",
+ "serde_repr",
+ "serde_with",
+ "timvw-rust-runtime",
+ "url",
+]
+
+[[package]]
+name = "openai-client-base-chat"
+version = "0.37.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3b6b1bdd5760fc99d3f9d5eaaa9eb16ebb41025f51c925e547c8fb49acf03cca"
+dependencies = [
+ "bon",
+ "futures-core",
+ "jiff 1.0.1",
+ "openai-client-base-common",
+ "regex",
+ "serde",
+ "serde_json",
+ "serde_repr",
+ "serde_with",
+ "timvw-rust-runtime",
+ "url",
+]
+
+[[package]]
+name = "openai-client-base-common"
+version = "0.37.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f4b1d0d2061cbf7240d103dc2bcbce5a2458246d8df8380a7fe042d0c9d9669d"
+dependencies = [
+ "bon",
+ "futures-core",
+ "jiff 1.0.1",
+ "regex",
+ "serde",
+ "serde_json",
+ "serde_repr",
+ "serde_with",
+ "timvw-rust-runtime",
+ "url",
+]
+
+[[package]]
+name = "openai-client-base-realtime"
+version = "0.37.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f30ff82463ea1d752672ce42f5d15b8da2ec8833ce97dab38a7c409af52966f9"
+dependencies = [
+ "bon",
+ "futures-core",
+ "jiff 1.0.1",
+ "openai-client-base-common",
+ "regex",
+ "serde",
+ "serde_json",
+ "serde_repr",
+ "serde_with",
+ "timvw-rust-runtime",
+ "url",
+]
+
+[[package]]
+name = "openai-client-base-responses"
+version = "0.37.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ebed188dff277dc424fbbfef8fc1f3730c029e0cc1b46acae4b6e98f21e92835"
+dependencies = [
+ "bon",
+ "futures-core",
+ "jiff 1.0.1",
+ "openai-client-base-common",
  "regex",
  "serde",
  "serde_json",
