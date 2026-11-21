@@ -26,7 +26,6 @@ pub struct UpdateProjectSpendLimitBody {
     /// The time interval for evaluating spend against the threshold. Currently, only `month` is supported.
     #[serde(rename = "interval")]
     pub interval: Interval,
-    /// Configure email notifications when the spend limit is reached. Leave this out to keep the current settings, or send null to reset to owner-only notifications.
     #[serde(
         rename = "notification_channel",
         default,
