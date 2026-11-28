@@ -10,6 +10,7 @@
 
 use serde::{Deserialize, Serialize};
 
+/// SpendLimitEmailNotificationChannelParams : Configure email notifications when the spend limit is reached. Leave this out to keep the current settings, or send null to reset to owner-only notifications.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, bon::Builder)]
 #[builder(state_mod = spend_limit_email_notification_channel_params_builder, finish_fn(vis = "", name = build_internal))]
 pub struct SpendLimitEmailNotificationChannelParams {
@@ -30,6 +31,7 @@ pub struct SpendLimitEmailNotificationChannelParams {
 }
 
 impl SpendLimitEmailNotificationChannelParams {
+    /// Configure email notifications when the spend limit is reached. Leave this out to keep the current settings, or send null to reset to owner-only notifications.
     pub fn new(r#type: Type) -> SpendLimitEmailNotificationChannelParams {
         SpendLimitEmailNotificationChannelParams {
             r#type,
