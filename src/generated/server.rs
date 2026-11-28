@@ -2865,6 +2865,8 @@ pub mod agents_api {
         Status404(models::ErrorResponse2),
         /// `409`: The request conflicted with the current session state.
         Status409(models::ErrorResponse2),
+        /// `429`: The request exceeded this endpoint's rate limit.
+        Status429(models::ErrorResponse2),
         /// `500`: An internal error occurred.
         Status500(models::ErrorResponse2),
         /// `503`: The service is temporarily unavailable.
@@ -2892,6 +2894,9 @@ pub mod agents_api {
                 }
                 CreateAgentResponse::Status409(body) => {
                     super::json_response(super::status(409), http::HeaderMap::new(), &body)
+                }
+                CreateAgentResponse::Status429(body) => {
+                    super::json_response(super::status(429), http::HeaderMap::new(), &body)
                 }
                 CreateAgentResponse::Status500(body) => {
                     super::json_response(super::status(500), http::HeaderMap::new(), &body)
@@ -2979,6 +2984,8 @@ pub mod agents_api {
         Status404(models::ErrorResponse2),
         /// `409`: The request conflicted with the current session state.
         Status409(models::ErrorResponse2),
+        /// `429`: The request exceeded this endpoint's rate limit.
+        Status429(models::ErrorResponse2),
         /// `500`: An internal error occurred.
         Status500(models::ErrorResponse2),
         /// `503`: The service is temporarily unavailable.
@@ -3006,6 +3013,9 @@ pub mod agents_api {
                 }
                 CreateAgentAutomationResponse::Status409(body) => {
                     super::json_response(super::status(409), http::HeaderMap::new(), &body)
+                }
+                CreateAgentAutomationResponse::Status429(body) => {
+                    super::json_response(super::status(429), http::HeaderMap::new(), &body)
                 }
                 CreateAgentAutomationResponse::Status500(body) => {
                     super::json_response(super::status(500), http::HeaderMap::new(), &body)
@@ -3095,6 +3105,8 @@ pub mod agents_api {
         Status404(models::ErrorResponse2),
         /// `409`: The request conflicted with the current session state.
         Status409(models::ErrorResponse2),
+        /// `429`: The request exceeded this endpoint's rate limit.
+        Status429(models::ErrorResponse2),
         /// `500`: An internal error occurred.
         Status500(models::ErrorResponse2),
         /// `503`: The service is temporarily unavailable.
@@ -3122,6 +3134,9 @@ pub mod agents_api {
                 }
                 CreateAgentAutomationInvocationResponse::Status409(body) => {
                     super::json_response(super::status(409), http::HeaderMap::new(), &body)
+                }
+                CreateAgentAutomationInvocationResponse::Status429(body) => {
+                    super::json_response(super::status(429), http::HeaderMap::new(), &body)
                 }
                 CreateAgentAutomationInvocationResponse::Status500(body) => {
                     super::json_response(super::status(500), http::HeaderMap::new(), &body)
@@ -3350,7 +3365,7 @@ pub mod agents_api {
         Status404(models::ErrorResponse2),
         /// `409`: The request conflicted with the current session state.
         Status409(models::ErrorResponse2),
-        /// `429`: The Files API rate limit for your user has been exceeded.
+        /// `429`: The Files API rate limit for your user has been exceeded. This status also applies to the endpoint rate limit.
         Status429(models::ErrorResponse2),
         /// `500`: An internal error occurred.
         Status500(models::ErrorResponse2),
@@ -3485,6 +3500,8 @@ pub mod agents_api {
         Status403(models::ErrorResponse2),
         /// `404`: The requested environment definition was not found.
         Status404(models::ErrorResponse2),
+        /// `429`: The request exceeded this endpoint's rate limit.
+        Status429(models::ErrorResponse2),
         /// `500`: An internal error occurred.
         Status500(models::ErrorResponse2),
         /// `503`: The service is temporarily unavailable.
@@ -3509,6 +3526,9 @@ pub mod agents_api {
                 }
                 CreateAgentEnvironmentTemplateResponse::Status404(body) => {
                     super::json_response(super::status(404), http::HeaderMap::new(), &body)
+                }
+                CreateAgentEnvironmentTemplateResponse::Status429(body) => {
+                    super::json_response(super::status(429), http::HeaderMap::new(), &body)
                 }
                 CreateAgentEnvironmentTemplateResponse::Status500(body) => {
                     super::json_response(super::status(500), http::HeaderMap::new(), &body)
@@ -3598,7 +3618,7 @@ pub mod agents_api {
         Status404(models::ErrorResponse2),
         /// `409`: The request conflicted with the current session state.
         Status409(models::ErrorResponse2),
-        /// `429`: The Files API rate limit for your user has been exceeded.
+        /// `429`: The Files API rate limit for your user has been exceeded. This status also applies to the endpoint rate limit.
         Status429(models::ErrorResponse2),
         /// `500`: An internal error occurred.
         Status500(models::ErrorResponse2),
@@ -3732,6 +3752,8 @@ pub mod agents_api {
         Status404(models::ErrorResponse2),
         /// `409`: The request conflicted with the current session state.
         Status409(models::ErrorResponse2),
+        /// `429`: The request exceeded this endpoint's rate limit.
+        Status429(models::ErrorResponse2),
         /// `500`: An internal error occurred.
         Status500(models::ErrorResponse2),
         /// `503`: The service is temporarily unavailable.
@@ -3759,6 +3781,9 @@ pub mod agents_api {
                 }
                 CreateAgentSessionEventsResponse::Status409(body) => {
                     super::json_response(super::status(409), http::HeaderMap::new(), &body)
+                }
+                CreateAgentSessionEventsResponse::Status429(body) => {
+                    super::json_response(super::status(429), http::HeaderMap::new(), &body)
                 }
                 CreateAgentSessionEventsResponse::Status500(body) => {
                     super::json_response(super::status(500), http::HeaderMap::new(), &body)
@@ -3864,6 +3889,8 @@ pub mod agents_api {
         Status404(models::ErrorResponse2),
         /// `409`: The request conflicted with the current session state.
         Status409(models::ErrorResponse2),
+        /// `429`: The request exceeded this endpoint's rate limit.
+        Status429(models::ErrorResponse2),
         /// `500`: An internal error occurred.
         Status500(models::ErrorResponse2),
         /// `503`: The service is temporarily unavailable.
@@ -3891,6 +3918,9 @@ pub mod agents_api {
                 }
                 DeleteAgentResponse::Status409(body) => {
                     super::json_response(super::status(409), http::HeaderMap::new(), &body)
+                }
+                DeleteAgentResponse::Status429(body) => {
+                    super::json_response(super::status(429), http::HeaderMap::new(), &body)
                 }
                 DeleteAgentResponse::Status500(body) => {
                     super::json_response(super::status(500), http::HeaderMap::new(), &body)
@@ -3993,6 +4023,8 @@ pub mod agents_api {
         Status404(models::ErrorResponse2),
         /// `409`: The request conflicted with the current session state.
         Status409(models::ErrorResponse2),
+        /// `429`: The request exceeded this endpoint's rate limit.
+        Status429(models::ErrorResponse2),
         /// `500`: An internal error occurred.
         Status500(models::ErrorResponse2),
         /// `503`: The service is temporarily unavailable.
@@ -4020,6 +4052,9 @@ pub mod agents_api {
                 }
                 DeleteAgentAutomationResponse::Status409(body) => {
                     super::json_response(super::status(409), http::HeaderMap::new(), &body)
+                }
+                DeleteAgentAutomationResponse::Status429(body) => {
+                    super::json_response(super::status(429), http::HeaderMap::new(), &body)
                 }
                 DeleteAgentAutomationResponse::Status500(body) => {
                     super::json_response(super::status(500), http::HeaderMap::new(), &body)
@@ -4122,6 +4157,8 @@ pub mod agents_api {
         Status404(models::ErrorResponse2),
         /// `409`: The request conflicted with the current environment state.
         Status409(models::ErrorResponse2),
+        /// `429`: The request exceeded this endpoint's rate limit.
+        Status429(models::ErrorResponse2),
         /// `500`: An internal error occurred.
         Status500(models::ErrorResponse2),
         /// `503`: The service is temporarily unavailable.
@@ -4149,6 +4186,9 @@ pub mod agents_api {
                 }
                 DeleteAgentEnvironmentTemplateResponse::Status409(body) => {
                     super::json_response(super::status(409), http::HeaderMap::new(), &body)
+                }
+                DeleteAgentEnvironmentTemplateResponse::Status429(body) => {
+                    super::json_response(super::status(429), http::HeaderMap::new(), &body)
                 }
                 DeleteAgentEnvironmentTemplateResponse::Status500(body) => {
                     super::json_response(super::status(500), http::HeaderMap::new(), &body)
@@ -4256,6 +4296,8 @@ pub mod agents_api {
         Status404(models::ErrorResponse2),
         /// `409`: The request conflicted with the current session state.
         Status409(models::ErrorResponse2),
+        /// `429`: The request exceeded this endpoint's rate limit.
+        Status429(models::ErrorResponse2),
         /// `500`: An internal error occurred.
         Status500(models::ErrorResponse2),
         /// `503`: The service is temporarily unavailable.
@@ -4283,6 +4325,9 @@ pub mod agents_api {
                 }
                 DeleteAgentSessionResponse::Status409(body) => {
                     super::json_response(super::status(409), http::HeaderMap::new(), &body)
+                }
+                DeleteAgentSessionResponse::Status429(body) => {
+                    super::json_response(super::status(429), http::HeaderMap::new(), &body)
                 }
                 DeleteAgentSessionResponse::Status500(body) => {
                     super::json_response(super::status(500), http::HeaderMap::new(), &body)
@@ -4394,6 +4439,8 @@ pub mod agents_api {
         Status404(models::ErrorResponse2),
         /// `409`: The request conflicted with the current session state.
         Status409(models::ErrorResponse2),
+        /// `429`: The request exceeded this endpoint's rate limit.
+        Status429(models::ErrorResponse2),
         /// `500`: An internal error occurred.
         Status500(models::ErrorResponse2),
         /// `503`: The service is temporarily unavailable.
@@ -4421,6 +4468,9 @@ pub mod agents_api {
                 }
                 DeleteAgentSessionArtifactResponse::Status409(body) => {
                     super::json_response(super::status(409), http::HeaderMap::new(), &body)
+                }
+                DeleteAgentSessionArtifactResponse::Status429(body) => {
+                    super::json_response(super::status(429), http::HeaderMap::new(), &body)
                 }
                 DeleteAgentSessionArtifactResponse::Status500(body) => {
                     super::json_response(super::status(500), http::HeaderMap::new(), &body)
@@ -4524,6 +4574,8 @@ pub mod agents_api {
         Status404(models::ErrorResponse2),
         /// `409`: The request conflicted with the current session state.
         Status409(models::ErrorResponse2),
+        /// `429`: The request exceeded this endpoint's rate limit.
+        Status429(models::ErrorResponse2),
         /// `500`: An internal error occurred.
         Status500(models::ErrorResponse2),
         /// `503`: The service is temporarily unavailable.
@@ -4551,6 +4603,9 @@ pub mod agents_api {
                 }
                 GetAgentAutomationResponse::Status409(body) => {
                     super::json_response(super::status(409), http::HeaderMap::new(), &body)
+                }
+                GetAgentAutomationResponse::Status429(body) => {
+                    super::json_response(super::status(429), http::HeaderMap::new(), &body)
                 }
                 GetAgentAutomationResponse::Status500(body) => {
                     super::json_response(super::status(500), http::HeaderMap::new(), &body)
@@ -4662,6 +4717,8 @@ pub mod agents_api {
         Status404(models::ErrorResponse2),
         /// `409`: The request conflicted with the current session state.
         Status409(models::ErrorResponse2),
+        /// `429`: The request exceeded this endpoint's rate limit.
+        Status429(models::ErrorResponse2),
         /// `500`: An internal error occurred.
         Status500(models::ErrorResponse2),
         /// `503`: The service is temporarily unavailable.
@@ -4689,6 +4746,9 @@ pub mod agents_api {
                 }
                 GetAgentAutomationInvocationResponse::Status409(body) => {
                     super::json_response(super::status(409), http::HeaderMap::new(), &body)
+                }
+                GetAgentAutomationInvocationResponse::Status429(body) => {
+                    super::json_response(super::status(429), http::HeaderMap::new(), &body)
                 }
                 GetAgentAutomationInvocationResponse::Status500(body) => {
                     super::json_response(super::status(500), http::HeaderMap::new(), &body)
@@ -4821,6 +4881,8 @@ pub mod agents_api {
         Status404(models::ErrorResponse2),
         /// `409`: The request conflicted with the current session state.
         Status409(models::ErrorResponse2),
+        /// `429`: The request exceeded this endpoint's rate limit.
+        Status429(models::ErrorResponse2),
         /// `500`: An internal error occurred.
         Status500(models::ErrorResponse2),
         /// `501`: This operation is not implemented.
@@ -4850,6 +4912,9 @@ pub mod agents_api {
                 }
                 ListAgentAutomationInvocationsResponse::Status409(body) => {
                     super::json_response(super::status(409), http::HeaderMap::new(), &body)
+                }
+                ListAgentAutomationInvocationsResponse::Status429(body) => {
+                    super::json_response(super::status(429), http::HeaderMap::new(), &body)
                 }
                 ListAgentAutomationInvocationsResponse::Status500(body) => {
                     super::json_response(super::status(500), http::HeaderMap::new(), &body)
@@ -4997,6 +5062,8 @@ pub mod agents_api {
         Status404(models::ErrorResponse2),
         /// `409`: The request conflicted with the current session state.
         Status409(models::ErrorResponse2),
+        /// `429`: The request exceeded this endpoint's rate limit.
+        Status429(models::ErrorResponse2),
         /// `500`: An internal error occurred.
         Status500(models::ErrorResponse2),
         /// `501`: Automation listing is not implemented.
@@ -5026,6 +5093,9 @@ pub mod agents_api {
                 }
                 ListAgentAutomationsResponse::Status409(body) => {
                     super::json_response(super::status(409), http::HeaderMap::new(), &body)
+                }
+                ListAgentAutomationsResponse::Status429(body) => {
+                    super::json_response(super::status(429), http::HeaderMap::new(), &body)
                 }
                 ListAgentAutomationsResponse::Status500(body) => {
                     super::json_response(super::status(500), http::HeaderMap::new(), &body)
@@ -5167,6 +5237,8 @@ pub mod agents_api {
         Status404(models::ErrorResponse2),
         /// `409`: The request conflicted with the current session state.
         Status409(models::ErrorResponse2),
+        /// `429`: The request exceeded this endpoint's rate limit.
+        Status429(models::ErrorResponse2),
         /// `500`: An internal error occurred.
         Status500(models::ErrorResponse2),
         /// `503`: The service is temporarily unavailable.
@@ -5194,6 +5266,9 @@ pub mod agents_api {
                 }
                 ListAgentEnvironmentFilesResponse::Status409(body) => {
                     super::json_response(super::status(409), http::HeaderMap::new(), &body)
+                }
+                ListAgentEnvironmentFilesResponse::Status429(body) => {
+                    super::json_response(super::status(429), http::HeaderMap::new(), &body)
                 }
                 ListAgentEnvironmentFilesResponse::Status500(body) => {
                     super::json_response(super::status(500), http::HeaderMap::new(), &body)
@@ -5328,6 +5403,8 @@ pub mod agents_api {
         Status403(models::ErrorResponse2),
         /// `404`: The requested environment definition was not found.
         Status404(models::ErrorResponse2),
+        /// `429`: The request exceeded this endpoint's rate limit.
+        Status429(models::ErrorResponse2),
         /// `500`: An internal error occurred.
         Status500(models::ErrorResponse2),
         /// `503`: The service is temporarily unavailable.
@@ -5352,6 +5429,9 @@ pub mod agents_api {
                 }
                 ListAgentEnvironmentTemplatesResponse::Status404(body) => {
                     super::json_response(super::status(404), http::HeaderMap::new(), &body)
+                }
+                ListAgentEnvironmentTemplatesResponse::Status429(body) => {
+                    super::json_response(super::status(429), http::HeaderMap::new(), &body)
                 }
                 ListAgentEnvironmentTemplatesResponse::Status500(body) => {
                     super::json_response(super::status(500), http::HeaderMap::new(), &body)
@@ -5471,6 +5551,8 @@ pub mod agents_api {
         Status404(models::ErrorResponse2),
         /// `409`: The request conflicted with the current environment state.
         Status409(models::ErrorResponse2),
+        /// `429`: The request exceeded a rate or capacity limit.
+        Status429(models::ErrorResponse2),
         /// `500`: An internal error occurred.
         Status500(models::ErrorResponse2),
         /// `503`: The service is temporarily unavailable.
@@ -5498,6 +5580,9 @@ pub mod agents_api {
                 }
                 ListAgentEnvironmentsResponse::Status409(body) => {
                     super::json_response(super::status(409), http::HeaderMap::new(), &body)
+                }
+                ListAgentEnvironmentsResponse::Status429(body) => {
+                    super::json_response(super::status(429), http::HeaderMap::new(), &body)
                 }
                 ListAgentEnvironmentsResponse::Status500(body) => {
                     super::json_response(super::status(500), http::HeaderMap::new(), &body)
@@ -5641,6 +5726,8 @@ pub mod agents_api {
         Status404(models::ErrorResponse2),
         /// `409`: The request conflicted with the current session state.
         Status409(models::ErrorResponse2),
+        /// `429`: The request exceeded this endpoint's rate limit.
+        Status429(models::ErrorResponse2),
         /// `500`: An internal error occurred.
         Status500(models::ErrorResponse2),
         /// `503`: The service is temporarily unavailable.
@@ -5668,6 +5755,9 @@ pub mod agents_api {
                 }
                 ListAgentSessionArtifactsResponse::Status409(body) => {
                     super::json_response(super::status(409), http::HeaderMap::new(), &body)
+                }
+                ListAgentSessionArtifactsResponse::Status429(body) => {
+                    super::json_response(super::status(429), http::HeaderMap::new(), &body)
                 }
                 ListAgentSessionArtifactsResponse::Status500(body) => {
                     super::json_response(super::status(500), http::HeaderMap::new(), &body)
@@ -5784,6 +5874,8 @@ pub mod agents_api {
         Status404(models::ErrorResponse2),
         /// `409`: The request conflicted with the current session state.
         Status409(models::ErrorResponse2),
+        /// `429`: The request exceeded this endpoint's rate limit.
+        Status429(models::ErrorResponse2),
         /// `500`: An internal error occurred.
         Status500(models::ErrorResponse2),
         /// `503`: The service is temporarily unavailable.
@@ -5814,6 +5906,9 @@ pub mod agents_api {
                 }
                 ListAgentSessionEventsResponse::Status409(body) => {
                     super::json_response(super::status(409), http::HeaderMap::new(), &body)
+                }
+                ListAgentSessionEventsResponse::Status429(body) => {
+                    super::json_response(super::status(429), http::HeaderMap::new(), &body)
                 }
                 ListAgentSessionEventsResponse::Status500(body) => {
                     super::json_response(super::status(500), http::HeaderMap::new(), &body)
@@ -5951,6 +6046,8 @@ pub mod agents_api {
         Status404(models::ErrorResponse2),
         /// `409`: The request conflicted with the current session state.
         Status409(models::ErrorResponse2),
+        /// `429`: The request exceeded this endpoint's rate limit.
+        Status429(models::ErrorResponse2),
         /// `500`: An internal error occurred.
         Status500(models::ErrorResponse2),
         /// `503`: The service is temporarily unavailable.
@@ -5978,6 +6075,9 @@ pub mod agents_api {
                 }
                 ListAgentSessionItemsResponse::Status409(body) => {
                     super::json_response(super::status(409), http::HeaderMap::new(), &body)
+                }
+                ListAgentSessionItemsResponse::Status429(body) => {
+                    super::json_response(super::status(429), http::HeaderMap::new(), &body)
                 }
                 ListAgentSessionItemsResponse::Status500(body) => {
                     super::json_response(super::status(500), http::HeaderMap::new(), &body)
@@ -6129,6 +6229,8 @@ pub mod agents_api {
         Status404(models::ErrorResponse2),
         /// `409`: The request conflicted with the current session state.
         Status409(models::ErrorResponse2),
+        /// `429`: The request exceeded this endpoint's rate limit.
+        Status429(models::ErrorResponse2),
         /// `500`: An internal error occurred.
         Status500(models::ErrorResponse2),
         /// `503`: The service is temporarily unavailable.
@@ -6156,6 +6258,9 @@ pub mod agents_api {
                 }
                 ListAgentSessionSubagentItemsResponse::Status409(body) => {
                     super::json_response(super::status(409), http::HeaderMap::new(), &body)
+                }
+                ListAgentSessionSubagentItemsResponse::Status429(body) => {
+                    super::json_response(super::status(429), http::HeaderMap::new(), &body)
                 }
                 ListAgentSessionSubagentItemsResponse::Status500(body) => {
                     super::json_response(super::status(500), http::HeaderMap::new(), &body)
@@ -6317,6 +6422,8 @@ pub mod agents_api {
         Status404(models::ErrorResponse2),
         /// `409`: The request conflicted with the current session state.
         Status409(models::ErrorResponse2),
+        /// `429`: The request exceeded this endpoint's rate limit.
+        Status429(models::ErrorResponse2),
         /// `500`: An internal error occurred.
         Status500(models::ErrorResponse2),
         /// `503`: The service is temporarily unavailable.
@@ -6344,6 +6451,9 @@ pub mod agents_api {
                 }
                 ListAgentSessionSubagentTurnItemsResponse::Status409(body) => {
                     super::json_response(super::status(409), http::HeaderMap::new(), &body)
+                }
+                ListAgentSessionSubagentTurnItemsResponse::Status429(body) => {
+                    super::json_response(super::status(429), http::HeaderMap::new(), &body)
                 }
                 ListAgentSessionSubagentTurnItemsResponse::Status500(body) => {
                     super::json_response(super::status(500), http::HeaderMap::new(), &body)
@@ -6497,6 +6607,8 @@ pub mod agents_api {
         Status404(models::ErrorResponse2),
         /// `409`: The request conflicted with the current session state.
         Status409(models::ErrorResponse2),
+        /// `429`: The request exceeded this endpoint's rate limit.
+        Status429(models::ErrorResponse2),
         /// `500`: An internal error occurred.
         Status500(models::ErrorResponse2),
         /// `503`: The service is temporarily unavailable.
@@ -6524,6 +6636,9 @@ pub mod agents_api {
                 }
                 ListAgentSessionSubagentTurnsResponse::Status409(body) => {
                     super::json_response(super::status(409), http::HeaderMap::new(), &body)
+                }
+                ListAgentSessionSubagentTurnsResponse::Status429(body) => {
+                    super::json_response(super::status(429), http::HeaderMap::new(), &body)
                 }
                 ListAgentSessionSubagentTurnsResponse::Status500(body) => {
                     super::json_response(super::status(500), http::HeaderMap::new(), &body)
@@ -6667,6 +6782,8 @@ pub mod agents_api {
         Status404(models::ErrorResponse2),
         /// `409`: The request conflicted with the current session state.
         Status409(models::ErrorResponse2),
+        /// `429`: The request exceeded this endpoint's rate limit.
+        Status429(models::ErrorResponse2),
         /// `500`: An internal error occurred.
         Status500(models::ErrorResponse2),
         /// `503`: The service is temporarily unavailable.
@@ -6694,6 +6811,9 @@ pub mod agents_api {
                 }
                 ListAgentSessionSubagentsResponse::Status409(body) => {
                     super::json_response(super::status(409), http::HeaderMap::new(), &body)
+                }
+                ListAgentSessionSubagentsResponse::Status429(body) => {
+                    super::json_response(super::status(429), http::HeaderMap::new(), &body)
                 }
                 ListAgentSessionSubagentsResponse::Status500(body) => {
                     super::json_response(super::status(500), http::HeaderMap::new(), &body)
@@ -6836,6 +6956,8 @@ pub mod agents_api {
         Status404(models::ErrorResponse2),
         /// `409`: The request conflicted with the current session state.
         Status409(models::ErrorResponse2),
+        /// `429`: The request exceeded this endpoint's rate limit.
+        Status429(models::ErrorResponse2),
         /// `500`: An internal error occurred.
         Status500(models::ErrorResponse2),
         /// `503`: The service is temporarily unavailable.
@@ -6863,6 +6985,9 @@ pub mod agents_api {
                 }
                 ListAgentSessionTracesResponse::Status409(body) => {
                     super::json_response(super::status(409), http::HeaderMap::new(), &body)
+                }
+                ListAgentSessionTracesResponse::Status429(body) => {
+                    super::json_response(super::status(429), http::HeaderMap::new(), &body)
                 }
                 ListAgentSessionTracesResponse::Status500(body) => {
                     super::json_response(super::status(500), http::HeaderMap::new(), &body)
@@ -7014,6 +7139,8 @@ pub mod agents_api {
         Status404(models::ErrorResponse2),
         /// `409`: The request conflicted with the current session state.
         Status409(models::ErrorResponse2),
+        /// `429`: The request exceeded this endpoint's rate limit.
+        Status429(models::ErrorResponse2),
         /// `500`: An internal error occurred.
         Status500(models::ErrorResponse2),
         /// `503`: The service is temporarily unavailable.
@@ -7041,6 +7168,9 @@ pub mod agents_api {
                 }
                 ListAgentSessionTurnItemsResponse::Status409(body) => {
                     super::json_response(super::status(409), http::HeaderMap::new(), &body)
+                }
+                ListAgentSessionTurnItemsResponse::Status429(body) => {
+                    super::json_response(super::status(429), http::HeaderMap::new(), &body)
                 }
                 ListAgentSessionTurnItemsResponse::Status500(body) => {
                     super::json_response(super::status(500), http::HeaderMap::new(), &body)
@@ -7184,6 +7314,8 @@ pub mod agents_api {
         Status404(models::ErrorResponse2),
         /// `409`: The request conflicted with the current session state.
         Status409(models::ErrorResponse2),
+        /// `429`: The request exceeded this endpoint's rate limit.
+        Status429(models::ErrorResponse2),
         /// `500`: An internal error occurred.
         Status500(models::ErrorResponse2),
         /// `503`: The service is temporarily unavailable.
@@ -7211,6 +7343,9 @@ pub mod agents_api {
                 }
                 ListAgentSessionTurnsResponse::Status409(body) => {
                     super::json_response(super::status(409), http::HeaderMap::new(), &body)
+                }
+                ListAgentSessionTurnsResponse::Status429(body) => {
+                    super::json_response(super::status(429), http::HeaderMap::new(), &body)
                 }
                 ListAgentSessionTurnsResponse::Status500(body) => {
                     super::json_response(super::status(500), http::HeaderMap::new(), &body)
@@ -7357,6 +7492,8 @@ pub mod agents_api {
         Status404(models::ErrorResponse2),
         /// `409`: The request conflicted with the current session state.
         Status409(models::ErrorResponse2),
+        /// `429`: The request exceeded this endpoint's rate limit.
+        Status429(models::ErrorResponse2),
         /// `500`: An internal error occurred.
         Status500(models::ErrorResponse2),
         /// `503`: The service is temporarily unavailable.
@@ -7384,6 +7521,9 @@ pub mod agents_api {
                 }
                 ListAgentSessionsResponse::Status409(body) => {
                     super::json_response(super::status(409), http::HeaderMap::new(), &body)
+                }
+                ListAgentSessionsResponse::Status429(body) => {
+                    super::json_response(super::status(429), http::HeaderMap::new(), &body)
                 }
                 ListAgentSessionsResponse::Status500(body) => {
                     super::json_response(super::status(500), http::HeaderMap::new(), &body)
@@ -7503,6 +7643,8 @@ pub mod agents_api {
         Status404(models::ErrorResponse2),
         /// `409`: The request conflicted with the current session state.
         Status409(models::ErrorResponse2),
+        /// `429`: The request exceeded this endpoint's rate limit.
+        Status429(models::ErrorResponse2),
         /// `500`: An internal error occurred.
         Status500(models::ErrorResponse2),
         /// `503`: The service is temporarily unavailable.
@@ -7530,6 +7672,9 @@ pub mod agents_api {
                 }
                 ListAgentsResponse::Status409(body) => {
                     super::json_response(super::status(409), http::HeaderMap::new(), &body)
+                }
+                ListAgentsResponse::Status429(body) => {
+                    super::json_response(super::status(429), http::HeaderMap::new(), &body)
                 }
                 ListAgentsResponse::Status500(body) => {
                     super::json_response(super::status(500), http::HeaderMap::new(), &body)
@@ -7627,6 +7772,8 @@ pub mod agents_api {
         Status404(models::ErrorResponse2),
         /// `409`: The request conflicted with the current session state.
         Status409(models::ErrorResponse2),
+        /// `429`: The request exceeded this endpoint's rate limit.
+        Status429(models::ErrorResponse2),
         /// `500`: An internal error occurred.
         Status500(models::ErrorResponse2),
         /// `503`: The service is temporarily unavailable.
@@ -7654,6 +7801,9 @@ pub mod agents_api {
                 }
                 PauseAgentAutomationResponse::Status409(body) => {
                     super::json_response(super::status(409), http::HeaderMap::new(), &body)
+                }
+                PauseAgentAutomationResponse::Status429(body) => {
+                    super::json_response(super::status(429), http::HeaderMap::new(), &body)
                 }
                 PauseAgentAutomationResponse::Status500(body) => {
                     super::json_response(super::status(500), http::HeaderMap::new(), &body)
@@ -7756,6 +7906,8 @@ pub mod agents_api {
         Status404(models::ErrorResponse2),
         /// `409`: The request conflicted with the current session state.
         Status409(models::ErrorResponse2),
+        /// `429`: The request exceeded this endpoint's rate limit.
+        Status429(models::ErrorResponse2),
         /// `500`: An internal error occurred.
         Status500(models::ErrorResponse2),
         /// `503`: The service is temporarily unavailable.
@@ -7783,6 +7935,9 @@ pub mod agents_api {
                 }
                 ResumeAgentAutomationResponse::Status409(body) => {
                     super::json_response(super::status(409), http::HeaderMap::new(), &body)
+                }
+                ResumeAgentAutomationResponse::Status429(body) => {
+                    super::json_response(super::status(429), http::HeaderMap::new(), &body)
                 }
                 ResumeAgentAutomationResponse::Status500(body) => {
                     super::json_response(super::status(500), http::HeaderMap::new(), &body)
@@ -7885,6 +8040,8 @@ pub mod agents_api {
         Status404(models::ErrorResponse2),
         /// `409`: The request conflicted with the current session state.
         Status409(models::ErrorResponse2),
+        /// `429`: The request exceeded this endpoint's rate limit.
+        Status429(models::ErrorResponse2),
         /// `500`: An internal error occurred.
         Status500(models::ErrorResponse2),
         /// `503`: The service is temporarily unavailable.
@@ -7912,6 +8069,9 @@ pub mod agents_api {
                 }
                 RetrieveAgentResponse::Status409(body) => {
                     super::json_response(super::status(409), http::HeaderMap::new(), &body)
+                }
+                RetrieveAgentResponse::Status429(body) => {
+                    super::json_response(super::status(429), http::HeaderMap::new(), &body)
                 }
                 RetrieveAgentResponse::Status500(body) => {
                     super::json_response(super::status(500), http::HeaderMap::new(), &body)
@@ -8014,6 +8174,8 @@ pub mod agents_api {
         Status404(models::ErrorResponse2),
         /// `409`: The request conflicted with the current session state.
         Status409(models::ErrorResponse2),
+        /// `429`: The request exceeded this endpoint's rate limit.
+        Status429(models::ErrorResponse2),
         /// `500`: An internal error occurred.
         Status500(models::ErrorResponse2),
         /// `503`: The service is temporarily unavailable.
@@ -8041,6 +8203,9 @@ pub mod agents_api {
                 }
                 RetrieveAgentEnvironmentResponse::Status409(body) => {
                     super::json_response(super::status(409), http::HeaderMap::new(), &body)
+                }
+                RetrieveAgentEnvironmentResponse::Status429(body) => {
+                    super::json_response(super::status(429), http::HeaderMap::new(), &body)
                 }
                 RetrieveAgentEnvironmentResponse::Status500(body) => {
                     super::json_response(super::status(500), http::HeaderMap::new(), &body)
@@ -8143,6 +8308,8 @@ pub mod agents_api {
         Status403(models::ErrorResponse2),
         /// `404`: The requested environment definition was not found.
         Status404(models::ErrorResponse2),
+        /// `429`: The request exceeded this endpoint's rate limit.
+        Status429(models::ErrorResponse2),
         /// `500`: An internal error occurred.
         Status500(models::ErrorResponse2),
         /// `503`: The service is temporarily unavailable.
@@ -8167,6 +8334,9 @@ pub mod agents_api {
                 }
                 RetrieveAgentEnvironmentTemplateResponse::Status404(body) => {
                     super::json_response(super::status(404), http::HeaderMap::new(), &body)
+                }
+                RetrieveAgentEnvironmentTemplateResponse::Status429(body) => {
+                    super::json_response(super::status(429), http::HeaderMap::new(), &body)
                 }
                 RetrieveAgentEnvironmentTemplateResponse::Status500(body) => {
                     super::json_response(super::status(500), http::HeaderMap::new(), &body)
@@ -8274,6 +8444,8 @@ pub mod agents_api {
         Status404(models::ErrorResponse2),
         /// `409`: The request conflicted with the current session state.
         Status409(models::ErrorResponse2),
+        /// `429`: The request exceeded this endpoint's rate limit.
+        Status429(models::ErrorResponse2),
         /// `500`: An internal error occurred.
         Status500(models::ErrorResponse2),
         /// `503`: The service is temporarily unavailable.
@@ -8301,6 +8473,9 @@ pub mod agents_api {
                 }
                 RetrieveAgentSessionResponse::Status409(body) => {
                     super::json_response(super::status(409), http::HeaderMap::new(), &body)
+                }
+                RetrieveAgentSessionResponse::Status429(body) => {
+                    super::json_response(super::status(429), http::HeaderMap::new(), &body)
                 }
                 RetrieveAgentSessionResponse::Status500(body) => {
                     super::json_response(super::status(500), http::HeaderMap::new(), &body)
@@ -8412,6 +8587,8 @@ pub mod agents_api {
         Status404(models::ErrorResponse2),
         /// `409`: The request conflicted with the current session state.
         Status409(models::ErrorResponse2),
+        /// `429`: The request exceeded this endpoint's rate limit.
+        Status429(models::ErrorResponse2),
         /// `500`: An internal error occurred.
         Status500(models::ErrorResponse2),
         /// `503`: The service is temporarily unavailable.
@@ -8439,6 +8616,9 @@ pub mod agents_api {
                 }
                 RetrieveAgentSessionArtifactResponse::Status409(body) => {
                     super::json_response(super::status(409), http::HeaderMap::new(), &body)
+                }
+                RetrieveAgentSessionArtifactResponse::Status429(body) => {
+                    super::json_response(super::status(429), http::HeaderMap::new(), &body)
                 }
                 RetrieveAgentSessionArtifactResponse::Status500(body) => {
                     super::json_response(super::status(500), http::HeaderMap::new(), &body)
@@ -8551,6 +8731,8 @@ pub mod agents_api {
         Status404(models::ErrorResponse2),
         /// `409`: The request conflicted with the current session state.
         Status409(models::ErrorResponse2),
+        /// `429`: The request exceeded this endpoint's rate limit.
+        Status429(models::ErrorResponse2),
         /// `500`: An internal error occurred.
         Status500(models::ErrorResponse2),
         /// `503`: The service is temporarily unavailable.
@@ -8583,6 +8765,9 @@ pub mod agents_api {
                 }
                 RetrieveAgentSessionArtifactContentResponse::Status409(body) => {
                     super::json_response(super::status(409), http::HeaderMap::new(), &body)
+                }
+                RetrieveAgentSessionArtifactContentResponse::Status429(body) => {
+                    super::json_response(super::status(429), http::HeaderMap::new(), &body)
                 }
                 RetrieveAgentSessionArtifactContentResponse::Status500(body) => {
                     super::json_response(super::status(500), http::HeaderMap::new(), &body)
@@ -8695,6 +8880,8 @@ pub mod agents_api {
         Status404(models::ErrorResponse2),
         /// `409`: The request conflicted with the current session state.
         Status409(models::ErrorResponse2),
+        /// `429`: The request exceeded this endpoint's rate limit.
+        Status429(models::ErrorResponse2),
         /// `500`: An internal error occurred.
         Status500(models::ErrorResponse2),
         /// `503`: The service is temporarily unavailable.
@@ -8722,6 +8909,9 @@ pub mod agents_api {
                 }
                 RetrieveAgentSessionSubagentResponse::Status409(body) => {
                     super::json_response(super::status(409), http::HeaderMap::new(), &body)
+                }
+                RetrieveAgentSessionSubagentResponse::Status429(body) => {
+                    super::json_response(super::status(429), http::HeaderMap::new(), &body)
                 }
                 RetrieveAgentSessionSubagentResponse::Status500(body) => {
                     super::json_response(super::status(500), http::HeaderMap::new(), &body)
@@ -8843,6 +9033,8 @@ pub mod agents_api {
         Status404(models::ErrorResponse2),
         /// `409`: The request conflicted with the current session state.
         Status409(models::ErrorResponse2),
+        /// `429`: The request exceeded this endpoint's rate limit.
+        Status429(models::ErrorResponse2),
         /// `500`: An internal error occurred.
         Status500(models::ErrorResponse2),
         /// `503`: The service is temporarily unavailable.
@@ -8870,6 +9062,9 @@ pub mod agents_api {
                 }
                 RetrieveAgentSessionSubagentTurnResponse::Status409(body) => {
                     super::json_response(super::status(409), http::HeaderMap::new(), &body)
+                }
+                RetrieveAgentSessionSubagentTurnResponse::Status429(body) => {
+                    super::json_response(super::status(429), http::HeaderMap::new(), &body)
                 }
                 RetrieveAgentSessionSubagentTurnResponse::Status500(body) => {
                     super::json_response(super::status(500), http::HeaderMap::new(), &body)
@@ -8983,6 +9178,8 @@ pub mod agents_api {
         Status404(models::ErrorResponse2),
         /// `409`: The request conflicted with the current session state.
         Status409(models::ErrorResponse2),
+        /// `429`: The request exceeded this endpoint's rate limit.
+        Status429(models::ErrorResponse2),
         /// `500`: An internal error occurred.
         Status500(models::ErrorResponse2),
         /// `503`: The service is temporarily unavailable.
@@ -9010,6 +9207,9 @@ pub mod agents_api {
                 }
                 RetrieveAgentSessionTurnResponse::Status409(body) => {
                     super::json_response(super::status(409), http::HeaderMap::new(), &body)
+                }
+                RetrieveAgentSessionTurnResponse::Status429(body) => {
+                    super::json_response(super::status(429), http::HeaderMap::new(), &body)
                 }
                 RetrieveAgentSessionTurnResponse::Status500(body) => {
                     super::json_response(super::status(500), http::HeaderMap::new(), &body)
@@ -9120,6 +9320,8 @@ pub mod agents_api {
         Status404(models::ErrorResponse2),
         /// `409`: The request conflicted with the current session state.
         Status409(models::ErrorResponse2),
+        /// `429`: The request exceeded this endpoint's rate limit.
+        Status429(models::ErrorResponse2),
         /// `500`: An internal error occurred.
         Status500(models::ErrorResponse2),
         /// `503`: The service is temporarily unavailable.
@@ -9147,6 +9349,9 @@ pub mod agents_api {
                 }
                 UpdateAgentResponse::Status409(body) => {
                     super::json_response(super::status(409), http::HeaderMap::new(), &body)
+                }
+                UpdateAgentResponse::Status429(body) => {
+                    super::json_response(super::status(429), http::HeaderMap::new(), &body)
                 }
                 UpdateAgentResponse::Status500(body) => {
                     super::json_response(super::status(500), http::HeaderMap::new(), &body)
@@ -9259,6 +9464,8 @@ pub mod agents_api {
         Status404(models::ErrorResponse2),
         /// `409`: The request conflicted with the current session state.
         Status409(models::ErrorResponse2),
+        /// `429`: The request exceeded this endpoint's rate limit.
+        Status429(models::ErrorResponse2),
         /// `500`: An internal error occurred.
         Status500(models::ErrorResponse2),
         /// `503`: The service is temporarily unavailable.
@@ -9286,6 +9493,9 @@ pub mod agents_api {
                 }
                 UpdateAgentAutomationResponse::Status409(body) => {
                     super::json_response(super::status(409), http::HeaderMap::new(), &body)
+                }
+                UpdateAgentAutomationResponse::Status429(body) => {
+                    super::json_response(super::status(429), http::HeaderMap::new(), &body)
                 }
                 UpdateAgentAutomationResponse::Status500(body) => {
                     super::json_response(super::status(500), http::HeaderMap::new(), &body)
@@ -9398,6 +9608,8 @@ pub mod agents_api {
         Status404(models::ErrorResponse2),
         /// `409`: The request conflicted with the current environment state.
         Status409(models::ErrorResponse2),
+        /// `429`: The request exceeded this endpoint's rate limit.
+        Status429(models::ErrorResponse2),
         /// `500`: An internal error occurred.
         Status500(models::ErrorResponse2),
         /// `503`: The service is temporarily unavailable.
@@ -9425,6 +9637,9 @@ pub mod agents_api {
                 }
                 UpdateAgentEnvironmentTemplateResponse::Status409(body) => {
                     super::json_response(super::status(409), http::HeaderMap::new(), &body)
+                }
+                UpdateAgentEnvironmentTemplateResponse::Status429(body) => {
+                    super::json_response(super::status(429), http::HeaderMap::new(), &body)
                 }
                 UpdateAgentEnvironmentTemplateResponse::Status500(body) => {
                     super::json_response(super::status(500), http::HeaderMap::new(), &body)
@@ -9542,6 +9757,8 @@ pub mod agents_api {
         Status404(models::ErrorResponse2),
         /// `409`: The request conflicted with the current session state.
         Status409(models::ErrorResponse2),
+        /// `429`: The request exceeded this endpoint's rate limit.
+        Status429(models::ErrorResponse2),
         /// `500`: An internal error occurred.
         Status500(models::ErrorResponse2),
         /// `503`: The service is temporarily unavailable.
@@ -9569,6 +9786,9 @@ pub mod agents_api {
                 }
                 UpdateAgentSessionResponse::Status409(body) => {
                     super::json_response(super::status(409), http::HeaderMap::new(), &body)
+                }
+                UpdateAgentSessionResponse::Status429(body) => {
+                    super::json_response(super::status(429), http::HeaderMap::new(), &body)
                 }
                 UpdateAgentSessionResponse::Status500(body) => {
                     super::json_response(super::status(500), http::HeaderMap::new(), &body)
@@ -46840,6 +47060,8 @@ pub mod vaults_api {
         Status404(models::ErrorResponse2),
         /// `409`: The request conflicted with the current vault state.
         Status409(models::ErrorResponse2),
+        /// `429`: The request exceeded this endpoint's rate limit.
+        Status429(models::ErrorResponse2),
         /// `500`: An internal error occurred.
         Status500(models::ErrorResponse2),
         /// `503`: The service is temporarily unavailable.
@@ -46867,6 +47089,9 @@ pub mod vaults_api {
                 }
                 CreateVaultResponse::Status409(body) => {
                     super::json_response(super::status(409), http::HeaderMap::new(), &body)
+                }
+                CreateVaultResponse::Status429(body) => {
+                    super::json_response(super::status(429), http::HeaderMap::new(), &body)
                 }
                 CreateVaultResponse::Status500(body) => {
                     super::json_response(super::status(500), http::HeaderMap::new(), &body)
@@ -46963,6 +47188,8 @@ pub mod vaults_api {
         Status404(models::ErrorResponse2),
         /// `409`: The request conflicted with the current vault state.
         Status409(models::ErrorResponse2),
+        /// `429`: The request exceeded this endpoint's rate limit.
+        Status429(models::ErrorResponse2),
         /// `500`: An internal error occurred.
         Status500(models::ErrorResponse2),
         /// `503`: The service is temporarily unavailable.
@@ -46990,6 +47217,9 @@ pub mod vaults_api {
                 }
                 CreateVaultCredentialResponse::Status409(body) => {
                     super::json_response(super::status(409), http::HeaderMap::new(), &body)
+                }
+                CreateVaultCredentialResponse::Status429(body) => {
+                    super::json_response(super::status(429), http::HeaderMap::new(), &body)
                 }
                 CreateVaultCredentialResponse::Status500(body) => {
                     super::json_response(super::status(500), http::HeaderMap::new(), &body)
@@ -47095,6 +47325,8 @@ pub mod vaults_api {
         Status404(models::ErrorResponse2),
         /// `409`: The request conflicted with the current vault state.
         Status409(models::ErrorResponse2),
+        /// `429`: The request exceeded this endpoint's rate limit.
+        Status429(models::ErrorResponse2),
         /// `500`: An internal error occurred.
         Status500(models::ErrorResponse2),
         /// `503`: The service is temporarily unavailable.
@@ -47122,6 +47354,9 @@ pub mod vaults_api {
                 }
                 DeleteVaultResponse::Status409(body) => {
                     super::json_response(super::status(409), http::HeaderMap::new(), &body)
+                }
+                DeleteVaultResponse::Status429(body) => {
+                    super::json_response(super::status(429), http::HeaderMap::new(), &body)
                 }
                 DeleteVaultResponse::Status500(body) => {
                     super::json_response(super::status(500), http::HeaderMap::new(), &body)
@@ -47233,6 +47468,8 @@ pub mod vaults_api {
         Status404(models::ErrorResponse2),
         /// `409`: The request conflicted with the current vault state.
         Status409(models::ErrorResponse2),
+        /// `429`: The request exceeded this endpoint's rate limit.
+        Status429(models::ErrorResponse2),
         /// `500`: An internal error occurred.
         Status500(models::ErrorResponse2),
         /// `503`: The service is temporarily unavailable.
@@ -47260,6 +47497,9 @@ pub mod vaults_api {
                 }
                 DeleteVaultCredentialResponse::Status409(body) => {
                     super::json_response(super::status(409), http::HeaderMap::new(), &body)
+                }
+                DeleteVaultCredentialResponse::Status429(body) => {
+                    super::json_response(super::status(429), http::HeaderMap::new(), &body)
                 }
                 DeleteVaultCredentialResponse::Status500(body) => {
                     super::json_response(super::status(500), http::HeaderMap::new(), &body)
@@ -47401,6 +47641,8 @@ pub mod vaults_api {
         Status404(models::ErrorResponse2),
         /// `409`: The request conflicted with the current vault state.
         Status409(models::ErrorResponse2),
+        /// `429`: The request exceeded this endpoint's rate limit.
+        Status429(models::ErrorResponse2),
         /// `500`: An internal error occurred.
         Status500(models::ErrorResponse2),
         /// `503`: The service is temporarily unavailable.
@@ -47428,6 +47670,9 @@ pub mod vaults_api {
                 }
                 ListVaultCredentialsResponse::Status409(body) => {
                     super::json_response(super::status(409), http::HeaderMap::new(), &body)
+                }
+                ListVaultCredentialsResponse::Status429(body) => {
+                    super::json_response(super::status(429), http::HeaderMap::new(), &body)
                 }
                 ListVaultCredentialsResponse::Status500(body) => {
                     super::json_response(super::status(500), http::HeaderMap::new(), &body)
@@ -47578,6 +47823,8 @@ pub mod vaults_api {
         Status404(models::ErrorResponse2),
         /// `409`: The request conflicted with the current vault state.
         Status409(models::ErrorResponse2),
+        /// `429`: The request exceeded this endpoint's rate limit.
+        Status429(models::ErrorResponse2),
         /// `500`: An internal error occurred.
         Status500(models::ErrorResponse2),
         /// `503`: The service is temporarily unavailable.
@@ -47605,6 +47852,9 @@ pub mod vaults_api {
                 }
                 ListVaultsResponse::Status409(body) => {
                     super::json_response(super::status(409), http::HeaderMap::new(), &body)
+                }
+                ListVaultsResponse::Status429(body) => {
+                    super::json_response(super::status(429), http::HeaderMap::new(), &body)
                 }
                 ListVaultsResponse::Status500(body) => {
                     super::json_response(super::status(500), http::HeaderMap::new(), &body)
@@ -47710,6 +47960,8 @@ pub mod vaults_api {
         Status404(models::ErrorResponse2),
         /// `409`: The request conflicted with the current vault state.
         Status409(models::ErrorResponse2),
+        /// `429`: The request exceeded this endpoint's rate limit.
+        Status429(models::ErrorResponse2),
         /// `500`: An internal error occurred.
         Status500(models::ErrorResponse2),
         /// `503`: The service is temporarily unavailable.
@@ -47737,6 +47989,9 @@ pub mod vaults_api {
                 }
                 RetrieveVaultResponse::Status409(body) => {
                     super::json_response(super::status(409), http::HeaderMap::new(), &body)
+                }
+                RetrieveVaultResponse::Status429(body) => {
+                    super::json_response(super::status(429), http::HeaderMap::new(), &body)
                 }
                 RetrieveVaultResponse::Status500(body) => {
                     super::json_response(super::status(500), http::HeaderMap::new(), &body)
@@ -47848,6 +48103,8 @@ pub mod vaults_api {
         Status404(models::ErrorResponse2),
         /// `409`: The request conflicted with the current vault state.
         Status409(models::ErrorResponse2),
+        /// `429`: The request exceeded this endpoint's rate limit.
+        Status429(models::ErrorResponse2),
         /// `500`: An internal error occurred.
         Status500(models::ErrorResponse2),
         /// `503`: The service is temporarily unavailable.
@@ -47875,6 +48132,9 @@ pub mod vaults_api {
                 }
                 RetrieveVaultCredentialResponse::Status409(body) => {
                     super::json_response(super::status(409), http::HeaderMap::new(), &body)
+                }
+                RetrieveVaultCredentialResponse::Status429(body) => {
+                    super::json_response(super::status(429), http::HeaderMap::new(), &body)
                 }
                 RetrieveVaultCredentialResponse::Status500(body) => {
                     super::json_response(super::status(500), http::HeaderMap::new(), &body)
@@ -47994,6 +48254,8 @@ pub mod vaults_api {
         Status404(models::ErrorResponse2),
         /// `409`: The request conflicted with the current vault state.
         Status409(models::ErrorResponse2),
+        /// `429`: The request exceeded this endpoint's rate limit.
+        Status429(models::ErrorResponse2),
         /// `500`: An internal error occurred.
         Status500(models::ErrorResponse2),
         /// `503`: The service is temporarily unavailable.
@@ -48021,6 +48283,9 @@ pub mod vaults_api {
                 }
                 RotateVaultCredentialResponse::Status409(body) => {
                     super::json_response(super::status(409), http::HeaderMap::new(), &body)
+                }
+                RotateVaultCredentialResponse::Status429(body) => {
+                    super::json_response(super::status(429), http::HeaderMap::new(), &body)
                 }
                 RotateVaultCredentialResponse::Status500(body) => {
                     super::json_response(super::status(500), http::HeaderMap::new(), &body)
@@ -48134,6 +48399,8 @@ pub mod vaults_api {
         Status404(models::ErrorResponse2),
         /// `409`: The request conflicted with the current vault state.
         Status409(models::ErrorResponse2),
+        /// `429`: The request exceeded this endpoint's rate limit.
+        Status429(models::ErrorResponse2),
         /// `500`: An internal error occurred.
         Status500(models::ErrorResponse2),
         /// `503`: The service is temporarily unavailable.
@@ -48161,6 +48428,9 @@ pub mod vaults_api {
                 }
                 UpdateVaultResponse::Status409(body) => {
                     super::json_response(super::status(409), http::HeaderMap::new(), &body)
+                }
+                UpdateVaultResponse::Status429(body) => {
+                    super::json_response(super::status(429), http::HeaderMap::new(), &body)
                 }
                 UpdateVaultResponse::Status500(body) => {
                     super::json_response(super::status(500), http::HeaderMap::new(), &body)

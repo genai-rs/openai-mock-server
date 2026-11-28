@@ -61,7 +61,7 @@ pub struct LiveMediaSessionCreateParams {
     pub client: Option<models::LiveClientConfigParam>,
     #[serde(rename = "wake_policy", skip_serializing_if = "Option::is_none")]
     pub wake_policy: Option<models::LiveSpeechWakePolicyParam>,
-    /// Whole seconds of inactivity after which a Live WebRTC session with a speech wake policy pauses inference. The connection and conversation history are retained. Omit to keep inference active after the first wake until the session ends.
+    /// Whole seconds of inactivity after which a Live WebRTC or SIP session with a speech wake policy pauses inference. The connection and conversation history are retained. Omit to keep inference active after the first wake until the session ends.
     ///
     /// Validation: `minimum: 5`, `maximum: 60`.
     #[serde(rename = "idle_timeout_s", skip_serializing_if = "Option::is_none")]
